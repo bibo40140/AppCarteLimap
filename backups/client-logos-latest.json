@@ -1,0 +1,51 @@
+{
+    "generated_at": "2026-03-09T16:38:50+00:00",
+    "count": 9,
+    "items": [
+        {
+            "id": "4",
+            "name": "AMAP Capbreton",
+            "logo_url": "https://amap-labenne.com/wp-content/uploads/2022/06/logoAmap.png"
+        },
+        {
+            "id": "7",
+            "name": "AMAP de Dax",
+            "logo_url": "https://i.imgur.com/IgoZAlO.jpeg"
+        },
+        {
+            "id": "8",
+            "name": "AMAP de Tarnos",
+            "logo_url": "https://amap-tarnos.fr/wp-content/themes/amap-tarnos/images/logo-header-amap-tarnos.jpg"
+        },
+        {
+            "id": "6",
+            "name": "AMAP du Moun",
+            "logo_url": "https://i.imgur.com/w0Yqbkz.png"
+        },
+        {
+            "id": "2",
+            "name": "AMAP Labenne",
+            "logo_url": "https://amap-labenne.com/wp-content/uploads/2022/06/logoAmap.png"
+        },
+        {
+            "id": "3",
+            "name": "AMAP Ondres",
+            "logo_url": "https://amap-labenne.com/wp-content/uploads/2022/06/logoAmap.png"
+        },
+        {
+            "id": "1",
+            "name": "Coopaz",
+            "logo_url": "https://i.imgur.com/4GCVbYP.png"
+        },
+        {
+            "id": "9",
+            "name": "Ecorx",
+            "logo_url": "/assets/icons/default-client.svg"
+        },
+        {
+            "id": "5",
+            "name": "Les petits ruisseaux",
+            "logo_url": "https://i.imgur.com/9ypZy8G.jpeg"
+        }
+    ]
+}

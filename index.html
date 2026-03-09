@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Carte OSM Fournisseurs & Clients</title>
+
+  <!-- Leaflet & MarkerCluster CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
+
+  <style>
+    /* Anti débordement horizontal */
+    html, body { overflow-x: hidden; }
+
+    body{ margin:0; font-family:Segoe UI,sans-serif; display:flex; height:100vh; }
+    #sidebar{
+      width:320px; padding:15px; background:#fff; border-right:1px solid #ddd;
+      overflow-y:auto; overflow-x:hidden; box-sizing:border-box;
+    }
+    #map{ flex:1; }
+
+    /* Les champs du menu occupent 100% sans dépasser */
+    #sidebar input[type="text"],
+    #sidebar input[type="search"],
+    #sidebar input[type="range"],
+    #sidebar select {
+      width:100%; max-width:100%; box-sizing:border-box;
+    }
+    #sidebar .small-btn { max-width:100%; box-sizing:border-box; }
+
+    /* Brand (logo + nom) */
+    #brand{
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      text-align:center; gap:8px; padding:8px 0 12px;
+    }
+    #brand img{
+      height:80px; width:auto; display:block; margin:0 auto;
+      border-radius:10px; border:1px solid #eee; max-width:100%; object-fit:contain;
+    }
+    #brand .title{ font-weight:800; font-size:18px; line-height:1.1; }
+
+    .accordion-section{ border-bottom:1px solid #eee; }
+    .accordion-toggle{
+      width:100%; background:none; border:none; font-weight:bold; text-align:left;
+      padding:10px 0; cursor:pointer;
+    }
+    .accordion-content{ max-height:0; overflow:hidden; transition:max-height .3s ease; }
+
+    .small-btn{ background:#007bff; color:#fff; padding:6px 8px; border:none; border-radius:4px; cursor:pointer; margin:5px 0; }
+    .label-checkbox-list label{ display:flex; align-items:center; margin:5px; }
+    .label-checkbox-list label img{ width:20px; height:20px; margin-right:6px; }
+    .label-color-swatch{ width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:6px; border:1px solid #aaa; }
+
+    .client-logos{ margin-top:6px; display:flex; flex-wrap:wrap; }
+    .client-logos img{ width:48px; height:48px; margin:2px; vertical-align:middle; border-radius:4px; border:1px solid #ccc; }
+    .social-logos{ display:flex; gap:6px; align-items:center; margin:6px 0; }
+
+    /* Familles → catégories (accordéon par famille) */
+    .famille-block{ margin:6px 0 10px 0; padding:6px; border:1px solid #eee; border-radius:6px; background:#fafafa; }
+    .famille-header{ display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:4px; cursor:pointer; user-select:none; }
+    .famille-caret{ font-size:12px; opacity:.7; transition:transform .2s ease; }
+    .famille-header .famille-name{ flex:1; }
+
+    .categorie-list{ margin-left:22px; max-height:0; overflow:hidden; transition:max-height .25s ease;  display:block;}
+	.categorie-list label{
+  display:flex;                  /* ou display:block si tu préfères */
+  align-items:center;
+  gap:6px;
+  margin:4px 0;
+  width:100%;
+}
+.categorie-list input[type="checkbox"]{
+  margin-right:6px;              /* petit espace avant le texte */
+}
+
+/* Mode PLAT (sans familles) : liste visible, pas d'accordéon */
+.categorie-list.flat{
+  max-height: none;     /* ne pas la cacher */
+  overflow: visible;    /* aucun masquage */
+  margin-left: 0;       /* pas de décalage */
+}
+/* (facultatif – tu as déjà une règle similaire) */
+.categorie-list.flat label{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  width: 100%;
+}
+
+.leaflet-marker-icon:hover {
+  filter: drop-shadow(0 0 6px rgba(255,140,0,0.8));
+  transition: filter 0.2s ease;
+}
+
+@keyframes pin-bounce {
+  0%   { transform: scale(1) translateY(0); }
+  35%  { transform: scale(1.03) translateY(-6px); }
+  70%  { transform: scale(1) translateY(0); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+.leaflet-marker-icon:hover .pin-anim {
+  animation: pin-fade-in 0.4s ease forwards, pin-bounce 0.6s ease;
+}
+
+
+
+    .famille-block.open .categorie-list{ max-height:2000px; overflow:auto; } /* grande limite animable */
+
+    /* Liste des producteurs (recherche) */
+    #producerList{ display:none; border:1px solid #eee; border-radius:6px; background:#fff; margin-top:6px; }
+    .producer-list{ max-height:260px; overflow:auto; border-radius:6px; }
+    .producer-item{ padding:8px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer; display:flex; align-items:center; gap:8px; }
+    .producer-item:last-child{ border-bottom:none; }
+    .producer-item:hover{ background:#f7f9ff; }
+    .producer-item .name{ font-weight:600; }
+    .producer-item .city{ font-size:12px; opacity:.8; }
+
+    #helpLinkContainer{ margin-top:10px; text-align:center; padding-top:10px; border-top:1px solid #ddd; }
+    #helpLinkContainer a{ text-decoration:none; color:#007bff; font-weight:bold; }
+
+    /* Panneau de droite */
+    #rightPane{
+      position:absolute; top:0; right:0; width:320px; height:100%;
+      background:#fff; border-left:1px solid #ddd; z-index:1005; display:flex; flex-direction:column;
+    }
+    .rp-header{ padding:10px 12px; font-weight:700; border-bottom:1px solid #eee; }
+    .rp-list{ overflow:auto; flex:1; }
+    .rp-item{ padding:8px 12px; border-bottom:1px solid #f5f5f5; cursor:pointer; }
+    .rp-item:hover{ background:#f7f9ff; }
+    .rp-name{ font-weight:600; }
+    .rp-city{ font-size:12px; opacity:.75; }
+    .rp-cats{ margin-top:4px; display:flex; flex-wrap:wrap; gap:6px; }
+    .rp-cat{ font-size:11px; padding:2px 6px; border:1px solid #ddd; border-radius:999px; background:#f8f8f8; }
+
+    /* Afficher/masquer */
+    #sidebar.hidden{ display:none; }     /* desktop : cache la colonne de gauche */
+    #rightPane.hidden{ display:none; }   /* cache le panneau de droite */
+
+    #toggleLeft, #toggleRight{
+      position:absolute; z-index:1100;
+      background:#fff; border:none; padding:8px 10px; border-radius:4px;
+      box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer;
+    }
+    #toggleLeft{ top:10px; left:10px; }     /* bouton pour le menu gauche */
+    #toggleRight{ top:10px; right:10px; }   /* bouton pour le panneau droit */
+	
+	/* n'anime PAS .leaflet-marker-icon directement */
+.leaflet-marker-icon .pin-anim {
+  opacity: 0;
+  transform: scale(0.6);
+  animation: pin-fade-in 0.4s ease forwards;
+}
+
+@keyframes pin-fade-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* optionnel : petit halo au survol, sans toucher transform */
+.leaflet-marker-icon:hover .pin-anim {
+  filter: drop-shadow(0 0 6px rgba(0,0,0,0.25));
+}
+
+	
+
+    /* Mobile (drawer gauche + overlay carte) */
+    @media (max-width:768px){
+      #sidebar{ position:absolute; top:0; left:-320px; height:100%; transition:left .3s ease; z-index:999; }
+      #sidebar.open{ left:0; }
+
+      #menuToggle{ display:none; } /* on n'utilise plus l'ancien bouton */
+
+      #map.overlay{ position:relative; }
+      #map.overlay::after{
+        content:''; position:absolute; top:0; left:0; right:0; bottom:0;
+        background:rgba(0,0,0,.2); z-index:998; /* < #rightPane et < boutons */
+      }
+    }
+	
+	
+  </style>
+</head>
+
+<body>
+  <div id="sidebar">
+  <div id="brand"></div>
+
+    <input id="search" type="text" placeholder="Rechercher un producteur…" style="width:100%;padding:8px;margin:8px 0;"/>
+    <div id="producerList"></div>
+
+    <div class="accordion-section">
+      <button class="accordion-toggle">🏬 Clients</button>
+      <div class="accordion-content">
+        <div id="clientCheckboxes" class="label-checkbox-list"></div>
+        <button id="toggleAllClients" class="small-btn" type="button">Tout décocher</button>
+		<div style="margin:6px 0;">
+  <label style="display:flex;align-items:center;gap:6px;">
+    <input id="toggleClientLayer" type="checkbox" checked>
+    <span>Afficher les clients</span>
+  </label>
+</div>
+
+      </div>
+	  
+    </div>
+
+    <div class="accordion-section">
+      <button class="accordion-toggle">🥕 Activités</button>
+      <div class="accordion-content">
+        <div id="activiteTree"></div>
+        <button id="toggleAllActivites" class="small-btn" type="button">Tout décocher</button>
+      </div>
+    </div>
+
+    <div class="accordion-section">
+      <button class="accordion-toggle">🏷️ Type</button>
+      <div class="accordion-content">
+        <div id="typeCheckboxes" class="label-checkbox-list"></div>
+        <button id="toggleAllTypes" class="small-btn" type="button">Tout décocher</button>
+      </div>
+    </div>
+	
+   <div class="accordion-section">
+      <button class="accordion-toggle">🏅 Labels</button>
+      <div class="accordion-content">
+        <div id="labelCheckboxes" class="label-checkbox-list"></div>
+        <button id="toggleAllLabels" class="small-btn" type="button">Tout décocher</button>
+      </div>
+    </div>
+
+    <div class="accordion-section">
+      <button class="accordion-toggle">📍 Distance max</button>
+      <div class="accordion-content">
+        <input type="range" id="distanceFilter" min="0" max="1000" step="5" value="1000"/>
+        <div id="distanceValue" style="margin-bottom:8px;">1000 km</div>
+
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+          <input id="centerAddress" type="text" placeholder="Adresse (ex: 1 rue …)" style="flex:1;"/>
+          <button id="setCenterBtn" class="small-btn" type="button">Définir</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+          <button id="myLocationBtn" class="small-btn" type="button">📍 Ma position</button>
+          <button id="resetCenterBtn" class="small-btn" type="button">Réinitialiser</button>
+        </div>
+        <div id="centerStatus" style="font-size:12px;color:#555;"></div>
+        <div style="font-size:12px;color:#777;margin-top:4px;">
+          Astuce : le point central est <b>déplaçable</b> (faire glisser le marqueur bleu).
+        </div>
+      </div>
+    </div>
+	
+
+ 
+
+    <div id="helpLinkContainer"><a href="#" id="helpLink">ℹ️ Besoin d'aide ?</a></div>
+
+  </div>
+
+  <button id="menuToggle" aria-label="Ouvrir/fermer le menu"
+    style="position:absolute; top:10px; left:10px; z-index:1000; background:#fff; border:none; padding:8px; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+    ☰
+  </button>
+
+  <div id="map"></div>
+  
+  <button id="toggleLeft" aria-label="Afficher/masquer le menu gauche">☰</button>
+<button id="toggleRight" aria-label="Afficher/masquer le panneau droit">⫷⫸</button>
+
+  
+  
+  <div id="rightPane">
+  <div class="rp-header">Producteurs visibles <span id="rpCount">0</span></div>
+  <div id="rightList" class="rp-list"></div>
+</div>
+
+  <!-- Librairies -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+
+
+  <script>
+  
+  
+  
+    // === 1) Variables globales ===
+    let orgLogoUrl = '';
+	let orgName = '';
+
+	let map, markerCluster, clientLayer, centralPoint, distanceCircle, centerMarker;
+    let allData = [], allGroups = [], allClients = [];
+    let markerById = {};
+    const geocodeCache = {};
+    const centralAddress = '6 rue des molinies, 40140 Azur';
+	
+	// --- Recherche intelligente (Fuse.js)
+let fuse = null;             // index Fuse pour producteurs
+let fuseMatchedIds = null;   // Set d'IDs (allData index) correspondant à la recherche courante
+
+
+    let globalFamilyToCats = new Map();
+    let selectedCategories = new Set();
+
+    const iconMapNorm = {};
+    const iconMapRaw  = {};
+    const labelColorMapNorm = {};
+    let defaultIconUrl = '';
+    let DEFAULT_CLIENT_ICON = '/assets/icons/default-client.svg';
+    let DEFAULT_PRODUCER_ICON = '/assets/icons/default-producer.svg';
+
+    let FARM_DIRECT_ICON = "https://i.imgur.com/DTHAKrv.jpeg";
+
+    // Helpers
+    const norm = s => (s==null?'' : String(s).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''));
+    const trimOrEmpty = s => (s==null?'':String(s).trim());
+    const splitActivite = val => {
+      const raw = String(val||''); if (!raw) return [];
+      const parts = raw.split(/,|;|\||\s\/\s/).map(s=>s.trim()).filter(Boolean);
+      return parts.length ? parts : [raw.trim()];
+    };
+    const splitLabels = val => {
+      const raw = String(val||''); if (!raw) return [];
+      const parts = raw.split(/,|;|\||\s\/\s/).map(s=>s.trim()).filter(Boolean);
+      return parts.length ? parts : [raw.trim()];
+    };
+    const isTruthyData = s => !!(String(s||'').trim()) && !/^(n\/?a|n\.a\.|na|none|sans|-|—)$/i.test(String(s).trim());
+    function sanitizeUrl(u) {
+      let s = String(u||'').trim();
+      if (!s) return '';
+      s = s.replace(/^[A-Za-z ]*:\s*/i, '');
+      s = s.replace(/^https?:?\/\//i, m => m.includes('s') ? 'https://' : 'http://');
+      if (/^www\./i.test(s)) s = 'https://' + s;
+      if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+      return s;
+    }
+    function getField(obj, aliases) {
+      for (const k of aliases) { if (obj[k] != null && String(obj[k]).trim() !== '') return obj[k]; }
+      return '';
+    }
+    function buildLinks(obj){
+      const siteVal = getField(obj, ['site','site internet','site web','website']);
+      const fbVal   = getField(obj, ['facebook','fb']);
+      const igVal   = getField(obj, ['instagram','insta','ig']);
+      const icons = [
+        { url: siteVal, src:'https://cdn-icons-png.flaticon.com/512/6510/6510417.png', alt:'Site' },
+        { url: fbVal,   src:'https://cdn-icons-png.flaticon.com/512/5968/5968764.png', alt:'Facebook' },
+        { url: igVal,   src:'https://cdn-icons-png.flaticon.com/512/3955/3955024.png', alt:'Instagram' },
+      ];
+      const html = icons.filter(it => isTruthyData(it.url))
+        .map(it => `<a href="${sanitizeUrl(it.url)}" target="_blank" rel="noopener" title="${it.alt}">
+          <img src="${it.src}" alt="${it.alt}" style="width:20px;height:20px"/>
+        </a>`).join('');
+      return html ? `<div class="social-logos">${html}</div>` : '';
+    }
+
+    // Drawer mobile
+    const menuToggle = document.getElementById('menuToggle');
+    const sidebar    = document.getElementById('sidebar');
+    const mapDiv     = document.getElementById('map');
+    menuToggle.addEventListener('click', () => {
+      const open = sidebar.classList.toggle('open');
+      if (open) mapDiv.classList.add('overlay'); else mapDiv.classList.remove('overlay');
+    });
+    mapDiv.addEventListener('click', () => {
+      if (sidebar.classList.contains('open')) { sidebar.classList.remove('open'); mapDiv.classList.remove('overlay'); }
+    });
+// --- Clients: visibilité / taille selon zoom ---
+// 0 = toujours visibles, sinon mets 8/9 etc.
+const CLIENTS_MIN_ZOOM = 6;
+
+// Cercle orange dimensionné selon le zoom
+function makeClientIconForZoom(iconUrl = '', bgColor = '#ffffff') {
+  const z = (map && map.getZoom) ? map.getZoom() : 10;
+
+  // 👇 taille augmentée : +6 px par rapport à avant
+  const size = Math.max(34, Math.min(62, 30 + z * 2.2));
+  const img  = Math.max(20, Math.min(size - 10, Math.round(size * 0.7)));
+
+  return L.divIcon({
+    className: '',
+    iconSize: [size, size],
+    iconAnchor: [size/2, size/2],
+    html: `
+      <div class="pin-anim" style="position:relative;width:${size}px;height:${size}px;">
+        <div style="
+          position:absolute; top:0; left:0; right:0; bottom:0;
+          background:${bgColor};
+          border:3px solid #FF8C00;
+          border-radius:50%;
+          box-shadow:0 1px 4px rgba(0,0,0,.28);
+        "></div>
+        ${iconUrl ? `
+          <img src="${iconUrl}" alt="" style="
+            position:absolute;
+            top:${(size - img)/2}px; left:${(size - img)/2}px;
+            width:${img}px; height:${img}px;
+            border-radius:50%;
+            object-fit:cover;"/>
+        ` : ''}
+      </div>`
+  });
+}
+
+
+
+
+// Affiche / cache la couche clients + ajuste la taille au zoom
+function updateClientsVisibilityAndSize() {
+  const cb = document.getElementById('toggleClientLayer');
+  const checkboxOk = (cb == null) ? true : !!cb.checked;
+  const zoomOk = (map ? map.getZoom() : 8) >= CLIENTS_MIN_ZOOM;
+  const shouldShow = checkboxOk && zoomOk;
+
+  const onMap = map && map.hasLayer && map.hasLayer(clientLayer);
+  if (shouldShow && !onMap) {
+    clientLayer.addTo(map);
+  } else if (!shouldShow && onMap) {
+    map.removeLayer(clientLayer);
+  }
+
+  // Redimensionner le cercle existant sans remplacer l’icône (on garde le bindPopup)
+  if (shouldShow && clientLayer && clientLayer.eachLayer) {
+    const outer = makeClientIconForZoom().options.iconSize[0];
+    clientLayer.eachLayer(mk => {
+      if (!mk._icon) return;
+      const el = mk._icon.querySelector('div');
+      if (el) {
+        el.style.width = outer + "px";
+        el.style.height = outer + "px";
+      }
+    });
+  }
+}
+
+
+    // === 2) Init carte ===
+  
+function initMap() {
+  map = L.map('map').setView([43.7, -1.3], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
+  markerCluster = L.markerClusterGroup().addTo(map);
+  map.on('moveend zoomend', renderRightPaneList);
+
+  // Pane dédié aux clients — au-dessus de overlayPane (~400) et en-dessous de markerPane (~600)
+  map.createPane('clientsPane');
+  map.getPane('clientsPane').style.zIndex = 550;     // <- était 350
+  map.getPane('clientsPane').style.pointerEvents = 'auto';
+
+  clientLayer = L.layerGroup().addTo(map);
+
+  // Ajuster l’affichage des clients quand on zoome
+  map.on('zoomend', updateClientsVisibilityAndSize);
+
+  geocode(centralAddress).then(pt => setCenter(pt, false));
+}
+
+
+    // === 3) Géocodage simple (Nominatim) ===
+    function geocode(addr) {
+      if (geocodeCache[addr]) return Promise.resolve(geocodeCache[addr]);
+      return fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`)
+        .then(r => r.json())
+        .then(data => {
+          const p = data[0] ? L.latLng(data[0].lat, data[0].lon) : null;
+          geocodeCache[addr] = p; return p;
+        }).catch(() => null);
+    }
+
+    // === 3bis) Centre + marker draggable ===
+    function setCenter(latlng, save = true) {
+      centralPoint = latlng;
+      if (!centralPoint) return;
+
+      if (!centerMarker) {
+        centerMarker = L.marker(centralPoint, { draggable:true, title:'Centre du filtre distance' }).addTo(map);
+        centerMarker.on('dragend', () => {
+          const ll = centerMarker.getLatLng();
+          setCenter(ll);
+          applyFilters();
+		  renderRightPaneList();
+
+        });
+      } else {
+        centerMarker.setLatLng(centralPoint);
+      }
+      drawDistanceCircle(+document.getElementById('distanceFilter').value);
+      const status = document.getElementById('centerStatus');
+      if (status) status.textContent = `Centre: ${centralPoint.lat.toFixed(5)}, ${centralPoint.lng.toFixed(5)}`;
+      if (save) {
+        try {
+          localStorage.setItem('centerLat', String(centralPoint.lat));
+          localStorage.setItem('centerLng', String(centralPoint.lng));
+        } catch(e) {}
+      }
+    }
+
+    // === 4) Cercle de distance ===
+ function drawDistanceCircle(km) {
+  if (distanceCircle) map.removeLayer(distanceCircle);
+  if (!centralPoint) return;
+  distanceCircle = L.circle(centralPoint, {
+    radius: km * 1000,
+    color: '#4285F4',
+    fillOpacity: 0.1,
+    interactive: false     // <- empêche le cercle de capter les clics
+  }).addTo(map);
+}
+
+
+    // === 5) Icône bullée ===
+function makeDivIcon(iconUrl, borderColor, size = 40, imgSize = 28) {
+  return L.divIcon({
+    className: '', 
+    iconSize: [size, size], 
+    iconAnchor: [size/2, size/2],
+    html: `
+      <div class="pin-anim" style="position:relative;width:${size}px;height:${size}px;">
+        <div style="position:absolute;top:0;left:0;width:${size}px;height:${size}px;
+                    border:3px solid ${borderColor};border-radius:50%;background:#fff;"></div>
+        ${iconUrl ? `<img src="${iconUrl}" onerror="this.onerror=null;this.src='${DEFAULT_PRODUCER_ICON}'" style="position:absolute;top:${(size-imgSize)/2}px;left:${(size-imgSize)/2}px;width:${imgSize}px;height:${imgSize}px;border-radius:50%;"/>` : ''}
+      </div>`
+  });
+}
+
+ // === 6) Menu Clients ===
+function buildClientMenu() {
+  const c = document.getElementById('clientCheckboxes');
+  c.innerHTML = '';
+
+  // 🔽 Tri alphabétique des clients par nom (insensible aux accents/majuscules)
+  const sortedClients = [...allClients].sort((a, b) =>
+    (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' })
+  );
+
+  sortedClients.forEach(e => {
+    const lbl = document.createElement('label');
+
+    const img = document.createElement('img');
+    img.src = e['url icône'] || e['url icone'] || DEFAULT_CLIENT_ICON;
+    img.onerror = () => { img.src = DEFAULT_CLIENT_ICON; };
+    img.style.width='20px'; img.style.height='20px'; img.style.marginRight='6px';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = e.nom;
+    cb.checked = true;
+    cb.onchange = applyFilters;
+
+    lbl.append(img, cb, document.createTextNode(' ' + e.nom));
+    c.append(lbl);
+  });
+
+  document.getElementById('toggleAllClients').onclick =
+    () => toggleGroup('clientCheckboxes','toggleAllClients');
+}
+function renderBrand(url, name){
+  const host = document.getElementById('brand');
+  if (!host) return;
+  host.innerHTML = '';
+
+  // Logo
+  if (url) {
+    const img = document.createElement('img');
+    img.src = sanitizeUrl(url);
+    img.alt = name || 'Logo association';
+    host.appendChild(img);
+  }
+
+  // Nom (si présent)
+  if (name) {
+    const txt = document.createElement('div');
+    txt.className = 'title';
+    txt.textContent = name;          // ← plus de "Coop'az" en dur
+    host.appendChild(txt);
+  }
+}
+
+
+
+    // === 7) Affichage des producteurs ===
+    function processData(labelColorMap) {
+      markerCluster.clearLayers();
+      allGroups = [];
+      markerById = {};
+      allData.forEach((item, i) => {
+        if (!item.latitude || !item.longitude) return;
+        const pt  = L.latLng(item.latitude, item.longitude);
+
+        const activites = splitActivite(item.activite);
+        const activitesNorm = activites.map(norm);
+        let iconUrl = '';
+        for (let k=0;k<activitesNorm.length;k++) {
+          const a = activitesNorm[k];
+          if (iconMapNorm[a]) { iconUrl = iconMapNorm[a]; break; }
+        }
+        if (!iconUrl) iconUrl = defaultIconUrl || DEFAULT_PRODUCER_ICON;
+
+        const labelList = item._labelsArr && item._labelsArr.length ? item._labelsArr : splitLabels(item.label);
+        let color = '#000';
+        for (const Lbl of labelList) {
+          const c = labelColorMap[norm(Lbl)];
+          if (c) { color = c; break; }
+        }
+        const div = makeDivIcon(iconUrl, color);
+
+       // --- Clients partenaires (triés A→Z) ---
+const collator = new Intl.Collator('fr', { sensitivity: 'base' });
+const clientNamesSorted = (item.client || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  .sort(collator.compare);
+
+let logosHTML = '<div class="client-logos">';
+
+// Icône "vente directe à la ferme" (si présent), avant les logos clients
+const vdaf = norm(item['vente direct a la ferme']) === 'oui';
+if (vdaf) {
+  logosHTML += `<img src="${FARM_DIRECT_ICON}" title="Vente directe à la ferme" alt="Vente directe" style="width:28px;height:28px;border-radius:4px;border:1px solid #ccc">`;
+}
+
+// Logos des clients, triés alphabétiquement
+clientNamesSorted.forEach(name => {
+  const cl = allClients.find(x => norm(x.nom) === norm(name));
+  const icon = cl && (cl['url icône'] || cl['url icone']);
+  const safeIcon = icon || DEFAULT_CLIENT_ICON;
+  logosHTML += `<img src="${safeIcon}" onerror="this.onerror=null;this.src='${DEFAULT_CLIENT_ICON}'" title="${cl?.nom || name}" alt="${cl?.nom || name}">`;
+});
+
+logosHTML += '</div>';
+
+
+        const linksHTML = buildLinks(item);
+        const labelsText = labelList.join(', ');
+		const typeText = splitTypes(item.type).join(', ') || '—';
+        const popup = `
+          <strong>${item.nom}</strong><br/>
+          ${item.adresse||''} ${item['code postal']||''} ${item.ville||''}<br/>
+          Activité: ${trimOrEmpty(item.activite)}<br/>
+Type: ${typeText}<br/>
+          Labels: ${labelsText || '—'}<br/>
+          Tél: ${trimOrEmpty(item.telephone)}<br/>
+          Mail: ${item.mail ? `<a href="mailto:${item.mail}">${item.mail}</a>` : ''}<br/>
+          ${linksHTML}
+          <div style="margin-top:6px;">Clients partenaires :</div>
+          ${logosHTML}
+        `;
+
+        const m = L.marker(pt, {icon: div, title: item.nom}).bindPopup(popup);
+        m.feature = { data: item, latlng: pt, activitesNorm, id: i };
+        allGroups.push(m);
+        markerById[i] = m;
+        markerCluster.addLayer(m);
+      });
+    }
+
+    // === 8) Construction des filtres ===
+    const splitTypes = val => {
+  const raw = String(val || ''); if (!raw) return [];
+  const parts = raw.split(/,|;|\||\s\/\s/).map(s => s.trim()).filter(Boolean);
+  return parts.length ? parts : [raw.trim()];
+};
+
+	
+	function buildFilters() {
+      buildActiviteTree();
+
+      // Types
+      const typeSet = new Set();
+allData.forEach(d => splitTypes(d.type).forEach(t => t && typeSet.add(t)));
+const types = Array.from(typeSet).sort();
+const tC = document.getElementById('typeCheckboxes'); tC.innerHTML = '';
+types.forEach(v => {
+  const lbl = document.createElement('label');
+  const cb  = document.createElement('input');
+  cb.type='checkbox'; cb.value=v; cb.checked=true; cb.onchange=applyFilters;
+  lbl.append(cb, document.createTextNode(' '+v)); tC.append(lbl);
+});
+document.getElementById('toggleAllTypes').onclick = () => toggleGroup('typeCheckboxes','toggleAllTypes');
+
+      // Labels
+      const labelSet = new Set();
+      allData.forEach(d => { splitLabels(d.label).forEach(L => labelSet.add(L)); });
+      const labels = Array.from(labelSet).filter(Boolean).sort();
+      const lC = document.getElementById('labelCheckboxes'); lC.innerHTML = '';
+      labels.forEach(v => {
+        const lbl = document.createElement('label');
+        const sw  = document.createElement('span');
+        sw.className='label-color-swatch'; sw.style.background=labelColorMapNorm[norm(v)]||'#000';
+        const cb  = document.createElement('input');
+        cb.type='checkbox'; cb.value=v; cb.checked=true; cb.onchange=applyFilters;
+        lbl.append(sw, cb, document.createTextNode(' '+v)); lC.append(lbl);
+      });
+      document.getElementById('toggleAllLabels').onclick = () => toggleGroup('labelCheckboxes','toggleAllLabels');
+
+      // Distance
+      const distanceInput = document.getElementById('distanceFilter');
+      const distanceValue = document.getElementById('distanceValue');
+      distanceInput.oninput = e => {
+        const km = +e.target.value;
+        distanceValue.textContent = km+' km';
+        drawDistanceCircle(km);
+        applyFilters();
+		renderRightPaneList();
+
+      };
+
+      // Recherche & accordéons
+      document.getElementById('search').oninput = applyFilters;
+
+
+      // Bouton tout (dé)cocher activités
+      document.getElementById('toggleAllActivites').onclick = () => {
+        const tree = document.getElementById('activiteTree');
+        const cbs = tree.querySelectorAll('input[data-kind="categorie"]');
+        const allChecked = Array.from(cbs).every(cb => cb.checked);
+        cbs.forEach(cb => cb.checked = !allChecked);
+        selectedCategories = new Set(Array.from(tree.querySelectorAll('input[data-kind="categorie"]:checked')).map(cb => cb.value));
+        updateFamilyCheckboxStates();
+        applyFilters();
+		renderRightPaneList();
+
+      };
+    }
+
+    // === 8bis) Familles → Catégories ===
+	
+	function shouldUseFlatCategories() {
+  // Pas de familles connues ?
+  if (!globalFamilyToCats || globalFamilyToCats.size === 0) return true;
+
+  // Si toutes les "familles" sont vides ou équivalent à "(Sans famille)", on passe en mode plat
+  const names = Array.from(globalFamilyToCats.keys()).map(s => norm(s || ''));
+  const real = names.filter(n => n && n !== 'sans famille' && n !== '(sans famille)' && n !== 'none' && n !== 'na');
+  return real.length === 0;
+}
+
+   function buildActiviteTree() {
+  const container = document.getElementById('activiteTree');
+  container.innerHTML = '';
+
+  // Si aucune définition via l’onglet "data", on reconstruit depuis allData
+  if (!globalFamilyToCats || globalFamilyToCats.size === 0) {
+    globalFamilyToCats = new Map();
+    allData.forEach(d => {
+      const fam = trimOrEmpty(d.famille);              // peut être vide
+      const cats = splitActivite(d.activite);
+      if (!cats.length) return;
+      const famKey = fam || '(Sans famille)';
+      if (!globalFamilyToCats.has(famKey)) globalFamilyToCats.set(famKey, new Set());
+      cats.forEach(c => globalFamilyToCats.get(famKey).add(c));
+    });
+  }
+
+  const flatMode = shouldUseFlatCategories();
+
+if (flatMode) {
+  // === MODE PLAT : on liste toutes les catégories sans accordéon ===
+  const catSet = new Set();
+  globalFamilyToCats.forEach(setCats => setCats.forEach(c => catSet.add(c)));
+  const cats = Array.from(catSet).sort();
+
+  // Sélection par défaut : tout coché la 1re fois
+  if (selectedCategories.size === 0) {
+    cats.forEach(c => selectedCategories.add(norm(c)));
+  } else {
+    // Nettoie les sélections orphelines
+    const valid = new Set(cats.map(c => norm(c)));
+    selectedCategories = new Set(Array.from(selectedCategories).filter(k => valid.has(k)));
+  }
+
+  // 👉 IMPORTANT : utiliser la classe 'categorie-list flat' pour hériter des styles label + s'afficher
+  const list = document.createElement('div');
+  list.className = 'categorie-list flat';
+
+  cats.forEach(cat => {
+    const lbl = document.createElement('label');
+    const cb  = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.kind = 'categorie';
+    cb.value = norm(cat);
+    cb.checked = selectedCategories.has(norm(cat));
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedCategories.add(cb.value); else selectedCategories.delete(cb.value);
+      applyFilters();
+      renderRightPaneList();
+    });
+    lbl.append(cb, document.createTextNode(' ' + cat));
+    list.append(lbl);
+  });
+
+  container.append(list);
+  // Pas de familles → rien à mettre à jour côté états
+  return;
+}
+
+
+  // === MODE FAMILLES → CATÉGORIES (accordéon) ===
+  // Si aucune sélection encore, on coche toutes les catégories
+  if (selectedCategories.size === 0) {
+    globalFamilyToCats.forEach(setCats => setCats.forEach(c => selectedCategories.add(norm(c))));
+  } else {
+    // Nettoyage des sélections orphelines
+    const valid = new Set();
+    globalFamilyToCats.forEach(setCats => setCats.forEach(c => valid.add(norm(c))));
+    selectedCategories = new Set(Array.from(selectedCategories).filter(k => valid.has(k)));
+  }
+
+  globalFamilyToCats.forEach((catsSet, fam) => {
+    const famBlock  = document.createElement('div'); famBlock.className = 'famille-block';
+    const famHeader = document.createElement('div'); famHeader.className = 'famille-header';
+
+    const caret = document.createElement('span'); caret.className = 'famille-caret'; caret.textContent = '▶';
+
+    const famCb = document.createElement('input');
+    famCb.type = 'checkbox';
+    famCb.dataset.kind = 'famille';
+    famCb.dataset.famille = fam;
+
+    famHeader.addEventListener('click', (e) => {
+      if (e.target === famCb) return; // clic direct sur la case → pas de toggle du volet
+      famBlock.classList.toggle('open');
+    });
+
+    famCb.addEventListener('change', () => {
+      const childCbs = famBlock.querySelectorAll('input[data-kind="categorie"]');
+      childCbs.forEach(cb => { cb.checked = famCb.checked; });
+      Array.from(catsSet).forEach(cat => {
+        if (famCb.checked) selectedCategories.add(norm(cat));
+        else selectedCategories.delete(norm(cat));
+      });
+      updateFamilyCheckboxStates();
+      applyFilters();
+      renderRightPaneList();
+    });
+
+    const famName = document.createElement('span'); famName.className = 'famille-name'; famName.textContent = fam;
+    famHeader.append(caret, famCb, famName);
+    famBlock.append(famHeader);
+
+    const catList = document.createElement('div'); catList.className = 'categorie-list';
+    const cats = Array.from(catsSet).sort();
+    cats.forEach(cat => {
+      const lbl = document.createElement('label');
+      const cb  = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.kind = 'categorie';
+      cb.dataset.famille = fam;
+      cb.value = norm(cat);
+      cb.checked = selectedCategories.has(norm(cat));
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedCategories.add(cb.value); else selectedCategories.delete(cb.value);
+        updateFamilyCheckboxStates();
+        applyFilters();
+        renderRightPaneList();
+      });
+      lbl.append(cb, document.createTextNode(' ' + cat));
+      catList.append(lbl);
+    });
+
+    famBlock.append(catList);
+    container.append(famBlock);
+  });
+
+  updateFamilyCheckboxStates();
+}
+
+  function updateFamilyCheckboxStates() {
+  const container = document.getElementById('activiteTree');
+  if (!container) return;
+
+  const famBlocks = container.querySelectorAll('.famille-block');
+  if (!famBlocks.length) {
+    // Mode plat : rien à faire
+    return;
+  }
+
+  famBlocks.forEach(block => {
+    const famCb = block.querySelector('input[data-kind="famille"]');
+    const childCbs = block.querySelectorAll('input[data-kind="categorie"]');
+    const total = childCbs.length;
+    const checked = Array.from(childCbs).filter(cb => cb.checked).length;
+    famCb.indeterminate = checked > 0 && checked < total;
+    famCb.checked = checked === total;
+  });
+}
+
+
+    // === 9) Toggle générique ===
+    function toggleGroup(containerId, btnId) {
+      const cbs = document.querySelectorAll('#'+containerId+' input[type=checkbox]');
+      const allChecked = Array.from(cbs).every(cb => cb.checked);
+      cbs.forEach(cb => cb.checked = !allChecked);
+      const btn = document.getElementById(btnId);
+      if (btn) btn.innerText = allChecked ? 'Tout cocher' : 'Tout décocher';
+      applyFilters();
+	  renderRightPaneList();
+
+    }
+	
+	function buildFuseIndex(){
+  // On prépare des documents avec les champs utiles et un id qui correspond à l’index de allData
+  const docs = allData.map((d, i) => ({
+    _id: i,
+    nom: d.nom || '',
+    ville: d.ville || '',
+    activite: d.activite || '',
+    type: d.type || '',
+    label: (d._labelsArr && d._labelsArr.length ? d._labelsArr.join(', ') : (d.label || '')),
+    clients: (d.client || ''),
+    // champ combiné pour attraper un peu tout
+    _combo: [
+      d.nom, d.ville, d.activite, d.type,
+      (d._labelsArr && d._labelsArr.length ? d._labelsArr.join(' ') : d.label),
+      d.client
+    ].filter(Boolean).join(' ')
+  }));
+
+  // Options Fuse : tolérance fautes, accents ignorés, multi-champs…
+  fuse = new Fuse(docs, {
+    includeScore: true,
+    ignoreLocation: true,
+    threshold: 0.35, // plus petit = plus strict ; 0.3–0.4 est souvent bien
+    keys: [
+      { name: 'nom', weight: 0.5 },
+      { name: 'ville', weight: 0.3 },
+      { name: 'activite', weight: 0.4 },
+      { name: 'type', weight: 0.2 },
+      { name: 'label', weight: 0.2 },
+      { name: 'clients', weight: 0.2 },
+      { name: '_combo', weight: 0.1 }
+    ],
+    // Normalisation rudimentaire des accents
+    getFn: (obj, path) => {
+      const v = Fuse.config.getFn(obj, path);
+      const toNorm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+      if (Array.isArray(v)) return v.map(toNorm);
+      return toNorm(v);
+    }
+  });
+}
+
+
+    // === 10) Filtrage principal ===
+function applyFilters() {
+  const sel = id => Array.from(document.querySelectorAll('#'+id+' input:checked')).map(cb => cb.value);
+  const selClients = sel('clientCheckboxes');
+  const selTypes   = sel('typeCheckboxes');
+  const selLabels  = sel('labelCheckboxes');
+
+  const maxD = +document.getElementById('distanceFilter').value;
+  const q    = document.getElementById('search').value.toLowerCase();
+
+  const visibleItems = [];
+  markerCluster.clearLayers();
+
+  allGroups.forEach(m => {
+    const d = m.feature.data;
+    const activitesNorm = m.feature.activitesNorm || splitActivite(d.activite).map(norm);
+
+    // === Clients ===
+    const clients = (d.client||'').split(',').map(s=>s.trim()).filter(Boolean);
+    let okClient = false;
+    if (selClients.length > 0) {
+      okClient = clients.some(c => selClients.includes(c));
+    }
+
+    // === Activités ===
+    let okCategorie = false;
+    if (selectedCategories.size > 0) {
+      okCategorie = activitesNorm.some(a => selectedCategories.has(a));
+    }
+
+    // === Labels ===
+    const itemLabels = d._labelsArr && d._labelsArr.length ? d._labelsArr : splitLabels(d.label);
+    let okLabel = false;
+    if (selLabels.length > 0) {
+      okLabel = itemLabels.some(L => selLabels.includes(L));
+    }
+
+    // === Types ===
+    let okType = false;
+    if (selTypes.length > 0) {
+      okType = splitTypes(d.type).some(t => selTypes.includes(t));
+    }
+
+    // === Distance ===
+    const dist = centralPoint ? map.distance(centralPoint, m.feature.latlng)/1000 : 0;
+
+    // === Nom (recherche) ===
+    const okSearch = d.nom.toLowerCase().includes(q);
+
+    if (okClient && okCategorie && okType && okLabel && dist <= maxD && okSearch) {
+      markerCluster.addLayer(m);
+      visibleItems.push({ id: m.feature.id, data: d });
+    }
+  });
+
+  renderProducerList(visibleItems);
+  renderRightPaneList();
+
+
+  // === Clients (affichage sur la carte) ===
+clientLayer.clearLayers();
+const currSelClients = new Set(sel('clientCheckboxes'));
+
+allClients.forEach(e => {
+  if (!currSelClients.has(e.nom)) return;
+
+  const lat = parseFloat(e.latitude), lng = parseFloat(e.longitude);
+  if (isNaN(lat) || isNaN(lng)) return;
+
+  const iconUrl = e['url icône'] || e['url icone'] || DEFAULT_CLIENT_ICON;
+  const div     = makeClientIconForZoom(iconUrl, '#fff');
+
+  const linksHTML = buildLinks(e);
+  const logoHtml = iconUrl
+    ? `<div style="margin-bottom:6px;"><img src="${iconUrl}" onerror="this.onerror=null;this.src='${DEFAULT_CLIENT_ICON}'" alt="Logo ${e.nom}" style="width:42px;height:42px;border-radius:6px;border:1px solid #ddd;object-fit:cover;"/></div>`
+    : '';
+  const popupHtml = `
+    ${logoHtml}
+    <strong>${e.nom}</strong><br/>
+    ${e.adresse || ''} ${e['code postal'] || ''} ${e.ville || ''}<br/>
+    ${linksHTML}
+    <hr style="margin:4px 0; border:none; border-top:1px solid #ccc;">
+    <strong>Tél :</strong> ${e.telephone || 'N/A'}<br/>
+    <strong>Mail :</strong> ${e.mail ? `<a href="mailto:${e.mail}" style="color:#007bff;text-decoration:none">${e.mail}</a>` : 'N/A'}<br/>
+    <strong>Horaires :</strong><br/>
+    Lun : ${e.lundi || '—'}<br/>
+    Mar : ${e.mardi || '—'}<br/>
+    Mer : ${e.mercredi || '—'}<br/>
+    Jeu : ${e.jeudi || '—'}<br/>
+    Ven : ${e.vendredi || '—'}<br/>
+    Sam : ${e.samedi || '—'}<br/>
+    Dim : ${e.dimanche || '—'}
+  `;
+
+  const mk = L.marker([lat, lng], { icon: div, title: e.nom, pane: 'clientsPane' })
+    .bindPopup(popupHtml)
+    .addTo(clientLayer);
+
+  // on garde l’URL du logo pour re-générer l’icône au zoom
+  mk._clientIconUrl = iconUrl;
+});
+
+}
+
+
+
+    // === 10bis) Liste des producteurs ===
+    function renderProducerList(items){
+      const host = document.getElementById('producerList');
+      if (!host) return;
+      host.innerHTML = '';
+
+      const q = (document.getElementById('search')?.value || '').trim();
+      if (q.length === 0) { host.style.display = 'none'; return; }
+
+      const sorted = items
+        .map(it => ({ id: it.id, nom: it.data.nom || '', ville: it.data.ville || '', labels: it.data._labelsArr || splitLabels(it.data.label) }))
+        .sort((a,b)=> a.nom.localeCompare(b.nom, 'fr', {sensitivity:'base'}));
+
+      const wrap = document.createElement('div');
+      wrap.className = 'producer-list';
+      sorted.forEach(row => {
+        const div = document.createElement('div');
+        div.className = 'producer-item';
+        div.innerHTML = `<div class="name">${row.nom}</div><div class="city">${row.ville}</div>`;
+       div.onclick = () => {
+  const mk = markerById[row.id];
+  if (!mk) return;
+  markerCluster.zoomToShowLayer(mk, () => {
+    mk.openPopup();
+    map.panTo(mk.getLatLng());
+  });
+};
+
+        wrap.append(div);
+      });
+      if (sorted.length === 0){
+        const empty = document.createElement('div');
+        empty.className = 'producer-item';
+        empty.textContent = 'Aucun producteur ne correspond à la recherche.';
+        wrap.append(empty);
+      }
+      host.append(wrap);
+      host.style.display = 'block';
+    }
+
+    // === 11) Centre depuis adresse / géoloc ===
+    async function setCenterFromAddress(addr) {
+      const status = document.getElementById('centerStatus');
+      if (status) status.textContent = 'Géocodage en cours...';
+      const pt = await geocode(addr);
+      if (!pt) { if (status) status.textContent = 'Adresse introuvable.'; return; }
+      setCenter(pt);
+      try { localStorage.setItem('centerAddress', addr); } catch(e) {}
+      applyFilters();
+	  renderRightPaneList();
+
+    }
+    function setCenterFromGeolocation() {
+      const status = document.getElementById('centerStatus');
+      if (!navigator.geolocation) { if (status) status.textContent = 'Géolocalisation non supportée.'; return; }
+      if (status) status.textContent = 'Récupération de la position...';
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude } = pos.coords;
+          setCenter(L.latLng(latitude, longitude));
+          try { localStorage.setItem('centerAddress', 'Ma position'); } catch(e) {}
+          applyFilters();
+		  renderRightPaneList();
+
+        },
+        err => { if (status) status.textContent = 'Impossible d’obtenir la position.'; console.warn(err); },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      );
+    }
+
+    // === 12) Chargement des données (BDD puis fallback XLSX) ===
+function loadData() {
+fetch('/api/index.php?action=map-data&v=' + Date.now())
+    .then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    })
+    .then(payload => {
+      if (!payload || !payload.ok) throw new Error(payload?.error || 'Réponse API invalide');
+
+      orgLogoUrl = payload.org_logo_url || '';
+      orgName = payload.org_name || '';
+      if (payload.default_client_icon) DEFAULT_CLIENT_ICON = payload.default_client_icon;
+      if (payload.default_producer_icon) DEFAULT_PRODUCER_ICON = payload.default_producer_icon;
+      if (payload.farm_direct_icon) FARM_DIRECT_ICON = payload.farm_direct_icon;
+
+      allData = Array.isArray(payload.data) ? payload.data : [];
+      allClients = (Array.isArray(payload.clients) ? payload.clients : []).map(c => ({
+        ...c,
+        nom: (c.nom || c.name || '').trim(),
+        adresse: c.adresse || c.address || '',
+        ville: c.ville || c.city || '',
+        telephone: c.telephone || c.phone || '',
+        mail: c.mail || c.email || '',
+        site: c.site || c.website || '',
+        'code postal': c['code postal'] || c.postal_code || '',
+        'url icône': c['url icône'] || c['url icone'] || c.logo_url || '',
+      }));
+
+      Object.assign(iconMapNorm, payload.icon_map_norm || {});
+      Object.assign(labelColorMapNorm, payload.label_color_map_norm || {});
+      if (!defaultIconUrl) defaultIconUrl = DEFAULT_PRODUCER_ICON;
+
+      globalFamilyToCats.clear();
+      (payload.activities || []).forEach(a => {
+        const fam = trimOrEmpty(a.family || '');
+        const cat = trimOrEmpty(a.name || '');
+        if (!cat) return;
+        if (!globalFamilyToCats.has(fam)) globalFamilyToCats.set(fam, new Set());
+        globalFamilyToCats.get(fam).add(cat);
+      });
+
+      allData = allData.map(obj => {
+        obj.nom = (obj.nom || '').trim();
+        obj.activite = (obj.activite || '').trim();
+        obj.famille = (obj.famille || '').trim();
+        obj.type = (obj.type || '').trim();
+        obj.label = (obj.label || '').trim();
+        obj.client = String(obj.client || '').replace(/;/g, ',').trim();
+        obj.mail = obj.mail || obj.email || '';
+        obj._labelsArr = Array.isArray(obj._labelsArr) ? obj._labelsArr : (obj.label ? obj.label.split(/,|;|\||\s\/\s/).map(s => s.trim()).filter(Boolean) : []);
+        obj._labelsNorm = Array.isArray(obj._labelsNorm) ? obj._labelsNorm : obj._labelsArr.map(s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+        return obj;
+      });
+
+      buildClientMenu();
+      buildFilters();
+      buildFuseIndex();
+      processData(labelColorMapNorm);
+      applyFilters();
+      renderRightPaneList();
+      renderBrand(orgLogoUrl, orgName);
+    })
+    .catch(err => {
+      console.warn('API BDD indisponible, fallback Excel :', err);
+      loadDataFromExcel();
+    });
+}
+
+function loadDataFromExcel() {
+fetch((currentMapId()==='root' ? '' : '/'+currentMapId()) + '/CarteFournisseur.xlsx?v=' + Date.now())
+    .then(resp => { if (!resp.ok) throw new Error('HTTP ' + resp.status); return resp.arrayBuffer(); })
+    .then(buf => {
+      const wb = XLSX.read(buf, { type: 'array' });
+
+      // Reset marque
+      orgLogoUrl = '';
+      orgName = '';
+
+	  // 1) Producteurs (feuille "Fournisseurs" de préférence)
+console.log("Feuilles trouvées :", wb.SheetNames);
+
+const preferredNames = ["Fournisseurs","fournisseurs","Producteurs","Producers"];
+const chosen = preferredNames.find(n => wb.Sheets[n]) || wb.SheetNames[0];
+if (!preferredNames.includes(chosen)) {
+  console.warn("⚠️ Feuille 'Fournisseurs' introuvable, on tombe sur la 1ʳᵉ feuille :", chosen);
+}
+const ws0 = wb.Sheets[chosen];
+
+allData = XLSX.utils.sheet_to_json(ws0, { defval: '' }).map(r => {
+  const obj = Object.fromEntries(
+    Object.entries(r).map(([k, v]) => [
+      k.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), v
+    ])
+  );
+  obj.nom      = (obj.nom || '').trim();
+  obj.activite = (obj.activite || '').trim();
+  obj.famille  = (obj.famille || '').trim();
+  obj.type     = (obj.type || '').trim();
+  obj.label    = (obj.label || '').trim();
+  obj.client   = (obj.client || '').trim();
+  obj._labelsArr  = (obj.label ? obj.label.split(/,|;|\||\s\/\s/).map(s=>s.trim()).filter(Boolean) : []);
+  obj._labelsNorm = obj._labelsArr.map(s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''));
+  return obj;
+});
+
+// DEBUG: valider l'import
+console.log("Feuille fournisseurs utilisée :", chosen, "• lignes lues :", allData.length);
+const hasLat = allData.some(r => 'latitude' in r);
+const hasLng = allData.some(r => 'longitude' in r);
+if (!hasLat || !hasLng) {
+  console.error("❌ Colonnes latitude/longitude non trouvées sur la feuille choisie :", chosen);
+}
+
+
+      // 2) Clients
+      const wsC = wb.Sheets['Client'] || wb.Sheets['Clients'] || wb.Sheets['client'];
+      if (wsC) {
+        allClients = XLSX.utils.sheet_to_json(wsC, { defval: '' }).map(r => Object.fromEntries(
+          Object.entries(r).map(([k, v]) => [k.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), v])
+        ));
+      } else {
+        allClients = [];
+      }
+
+      // 3) Data: icônes, couleurs, familles + (logo & nom dans l’onglet "data")
+      iconMapNorm["__dummy__"] = undefined;
+      const sheetNames = wb.SheetNames;
+
+      sheetNames.forEach(name => {
+        const ws = wb.Sheets[name];
+        if (!ws) return;
+
+        const isDataSheet = norm(name) === 'data';
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }).map(raw => Object.fromEntries(
+          Object.entries(raw).map(([k, v]) => [k.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), v])
+        ));
+
+        rows.forEach(row => {
+          // Icônes par activité
+          if (row.activite && row['url icône']) {
+            const aRaw = trimOrEmpty(row.activite);
+            iconMapRaw[aRaw] = row['url icône'];
+            iconMapNorm[norm(aRaw)] = row['url icône'];
+          }
+          if (row.activite && row['url icone']) {
+            const aRaw = trimOrEmpty(row.activite);
+            iconMapRaw[aRaw] = row['url icone'];
+            iconMapNorm[norm(aRaw)] = row['url icone'];
+          }
+
+          // Couleurs des labels
+          if (row.label && row.labelcolor) {
+            labelColorMapNorm[norm(row.label)] = row.labelcolor;
+          }
+
+          // Logo & nom uniquement depuis l’onglet "data"
+          if (isDataSheet) {
+            if (!orgName && row.nom) {
+              orgName = String(row.nom).trim();
+            }
+            if (!orgLogoUrl && (row['url logo'] || row['url_logo'] || row['urllogo'])) {
+              orgLogoUrl = row['url logo'] || row['url_logo'] || row['urllogo'];
+            }
+          }
+
+          // Icône par défaut
+          if (row.activite && ['*', 'default', 'defaut'].includes(norm(row.activite))) {
+            defaultIconUrl = row['url icône'] || row['url icone'] || defaultIconUrl;
+          }
+
+          // Arbre Famille → Catégories
+          if (row.famille && row.activite) {
+            const fam = trimOrEmpty(row.famille);
+            const cat = trimOrEmpty(row.activite);
+            if (!globalFamilyToCats.has(fam)) globalFamilyToCats.set(fam, new Set());
+            globalFamilyToCats.get(fam).add(cat);
+          }
+        });
+      });
+	  
+      // 4) Menus + affichage
+      buildClientMenu();
+      buildFilters();
+	  buildFuseIndex();
+      processData(labelColorMapNorm);
+      applyFilters();
+      renderRightPaneList();
+
+      // Affiche la marque (logo + nom) dans le menu gauche
+      renderBrand(orgLogoUrl, orgName);
+    })
+    .catch(err => console.error('Impossible de charger CarteFournisseur.xlsx :', err));
+}
+
+
+    // === 13) Popup d’aide ===
+    function showWelcomePopup() {
+      L.popup({ maxWidth: 300, closeButton: true })
+        .setLatLng( map.getCenter() )
+        .setContent(`
+          <div style="font-size:14px; line-height:1.4;">
+            <strong>Bienvenue&nbsp;!</strong><br/>
+            <p>Cette carte affiche&nbsp;:</p>
+            <ul style="padding-left:1em; margin:0;">
+              <li>Les producteurs (marqueurs colorés)</li>
+              <li>Les clients partenaires (icônes oranges)</li>
+            </ul>
+            <p>Utilisez le panneau à gauche pour&nbsp;:</p>
+            <ul style="padding-left:1em; margin:0;">
+              <li>Filtrer par client, <em>famille → catégorie</em>, type, label</li>
+              <li>Définir une distance max (centre déplaçable / adresse / géoloc)</li>
+              <li>Rechercher un producteur par nom</li>
+            </ul>
+            Cliquez n’importe où pour fermer cette fenêtre.
+          </div>
+        `)
+        .openOn(map);
+    }
+
+    // === 14) Affichage conditionnel de la liste (recherche) ===
+    (function setupProducerListToggling(){
+      const searchInput = document.getElementById('search');
+      const listEl = document.getElementById('producerList');
+      const showListIfNotEmpty = () => {
+        if (searchInput.value.trim().length > 0) listEl.style.display = 'block';
+      };
+      const hideList = () => { listEl.style.display = 'none'; };
+
+      searchInput.addEventListener('focus', showListIfNotEmpty);
+      searchInput.addEventListener('input', () => {
+        if (searchInput.value.trim().length === 0) hideList();
+        else showListIfNotEmpty();
+        applyFilters();
+		renderRightPaneList();
+
+      });
+
+      document.addEventListener('click', (e) => {
+        const clickedInside = listEl.contains(e.target) || searchInput.contains(e.target);
+        if (!clickedInside) hideList();
+      });
+
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          hideList();
+          searchInput.blur();
+        }
+      });
+    })();
+
+    // === 15) Démarrage ===
+    window.onload = () => {
+      initMap();
+      showWelcomePopup();
+      loadData();
+
+
+      // Centre dynamique: boutons
+      document.getElementById('setCenterBtn').onclick = () => {
+        const addr = document.getElementById('centerAddress').value.trim();
+        if (addr) setCenterFromAddress(addr);
+      };
+      document.getElementById('myLocationBtn').onclick = () => setCenterFromGeolocation();
+      document.getElementById('resetCenterBtn').onclick = () => {
+        document.getElementById('centerAddress').value = '';
+        geocode(centralAddress).then(pt => {
+          setCenter(pt);
+          try {
+            localStorage.removeItem('centerAddress');
+            localStorage.removeItem('centerLat');
+            localStorage.removeItem('centerLng');
+          } catch(e) {}
+          applyFilters();
+		  renderRightPaneList();
+
+        });
+      };
+
+      // Restauration du centre
+      try {
+        const savedLat = parseFloat(localStorage.getItem('centerLat'));
+        const savedLng = parseFloat(localStorage.getItem('centerLng'));
+        const savedAddr = localStorage.getItem('centerAddress');
+        if (!Number.isNaN(savedLat) && !Number.isNaN(savedLng)) {
+          setCenter(L.latLng(savedLat, savedLng), false);
+        } else if (savedAddr && savedAddr !== 'Ma position') {
+          document.getElementById('centerAddress').value = savedAddr;
+          setCenterFromAddress(savedAddr);
+        } else {
+          geocode(centralAddress).then(pt => setCenter(pt, false));
+        }
+      } catch(e) {
+        geocode(centralAddress).then(pt => setCenter(pt, false));
+      }
+
+  document.getElementById('helpLink').onclick = e => { e.preventDefault(); showWelcomePopup(); };
+      // --- Étape E : toggle "Afficher les clients" + init ---
+const toggleClientLayerEl = document.getElementById('toggleClientLayer');
+if (toggleClientLayerEl) {
+  toggleClientLayerEl.addEventListener('change', () => {
+    updateClientsVisibilityAndSize();   // (défini à l’étape B)
+  });
+}
+
+// Premier calcul une fois la carte prête
+map.whenReady(() => {
+  updateClientsVisibilityAndSize();
+});
+
+	  setupUploadModal();
+	  
+
+	};
+	
+	
+function getVisibleFilteredMarkers() {
+  const bounds = map.getBounds();
+  const layers = markerCluster.getLayers().filter(mk => bounds.contains(mk.getLatLng()));
+  return layers.map(mk => {
+    const d = mk.feature.data;
+    // Liste d'activités lisibles (pas les versions normalisées)
+    const cats = splitActivite(d.activite); // ex: ["Légumes", "Fruits"]
+    return {
+      id: mk.feature.id,
+      nom: d.nom || '',
+      ville: d.ville || '',
+      cats,              // ← on garde le tableau
+      marker: mk
+    };
+  });
+}
+
+
+function renderRightPaneList() {
+  const listEl = document.getElementById('rightList');
+  const countEl = document.getElementById('rpCount');
+  if (!listEl || !countEl) return;
+
+  const items = getVisibleFilteredMarkers()
+    .sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+
+  countEl.textContent = items.length;
+  listEl.innerHTML = '';
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<div class="rp-item">Aucun producteur visible à ce zoom.</div>';
+    return;
+  }
+
+  items.forEach(row => {
+    const div = document.createElement('div');
+    div.className = 'rp-item';
+    // Construit les badges catégories
+  const catsActive = row.cats.filter(c => selectedCategories.has(norm(c)));
+const catsHtml = catsActive.length
+  ? `<div class="rp-cats">${catsActive.map(c => `<span class="rp-cat">${c}</span>`).join('')}</div>`
+  : '';
+
+
+    div.innerHTML = `
+      <div class="rp-name">${row.nom}</div>
+      <div class="rp-city">${row.ville || ''}</div>
+      ${catsHtml}
+    `;
+
+    div.onclick = () => {
+  markerCluster.zoomToShowLayer(row.marker, () => {
+    row.marker.openPopup();
+    map.panTo(row.marker.getLatLng());
+  });
+};
+
+    listEl.appendChild(div);
+  });
+}
+
+// Helper animé pour un panneau
+function animatePanel(panelEl, open){
+  if (open){
+    panelEl.style.maxHeight = '0px';
+    panelEl.style.overflow = 'hidden';
+    // force reflow
+    panelEl.offsetHeight;
+    panelEl.style.transition = 'max-height .3s ease';
+    panelEl.style.maxHeight = panelEl.scrollHeight + 'px';
+    // après l’anim, on enlève la limite pour ne pas couper si le contenu change
+    panelEl.addEventListener('transitionend', function tidy(e){
+      if (e.propertyName === 'max-height'){
+        panelEl.style.maxHeight = 'none';
+        panelEl.style.overflow = 'visible';
+        panelEl.removeEventListener('transitionend', tidy);
+      }
+    });
+  } else {
+    // repasse par une valeur fixe pour fermer proprement
+    panelEl.style.overflow = 'hidden';
+    panelEl.style.maxHeight = panelEl.scrollHeight + 'px';
+    panelEl.offsetHeight;
+    panelEl.style.transition = 'max-height .3s ease';
+    panelEl.style.maxHeight = '0px';
+  }
+}
+
+// Brancher sur tes accordéons existants
+document.querySelectorAll('.accordion-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const section = btn.parentElement;
+    const content = section.querySelector('.accordion-content');
+    const opening = !section.classList.contains('active');
+    section.classList.toggle('active');
+    animatePanel(content, opening);
+  });
+});
+
+// Familles → catégories
+document.querySelectorAll('.famille-header').forEach(head => {
+  head.addEventListener('click', (e) => {
+    const block = head.parentElement;
+    if (e.target?.dataset?.kind === 'famille') return; // clic direct sur la case → on ne plie pas
+    const list = block.querySelector('.categorie-list');
+    const opening = !block.classList.contains('open');
+    block.classList.toggle('open');
+    animatePanel(list, opening);
+  });
+});
+
+function isMobile(){ return window.matchMedia('(max-width:768px)').matches; }
+
+function toggleLeftPane(){
+  const sb = document.getElementById('sidebar');
+  const mapDiv = document.getElementById('map');
+
+  if (isMobile()){
+    // Drawer mobile : on joue avec .open
+    const open = sb.classList.toggle('open');
+    if (open) mapDiv.classList.add('overlay'); else mapDiv.classList.remove('overlay');
+  } else {
+    // Desktop : on masque/affiche en flex
+    sb.classList.toggle('hidden');
+  }
+  // Recalcule la taille de la carte pour éviter les tuiles découpées
+  setTimeout(() => map.invalidateSize(), 200);
+}
+
+function toggleRightPane(){
+  const rp = document.getElementById('rightPane');
+  rp.classList.toggle('hidden');
+  // Invalider la taille de la carte après le reflow
+  setTimeout(() => map.invalidateSize(), 200);
+}
+
+document.getElementById('toggleLeft').addEventListener('click', toggleLeftPane);
+document.getElementById('toggleRight').addEventListener('click', toggleRightPane);
+
+// (Optionnel) Fermer le drawer mobile si on clique sur la carte
+document.getElementById('map').addEventListener('click', () => {
+  if (!isMobile()) return;
+  const sb = document.getElementById('sidebar');
+  if (sb.classList.contains('open')){
+    sb.classList.remove('open');
+    document.getElementById('map').classList.remove('overlay');
+    setTimeout(() => map.invalidateSize(), 200);
+  }
+});
+
+
+
+// Détecte la carte (root, limap, interkoop, ou autre dossier)
+function currentMapId() {
+  const p = location.pathname.replace(/\/+$/,'');
+  const first = p.split('/').filter(Boolean)[0] || 'root';
+  return first === '' ? 'root' : first;
+}
+
+
+
+// Upload au serveur via upload.php
+// ⇣⇣ remplace TOUTE ta fonction par celle-ci
+async function uploadExcelToServer(file, password, statusEl){
+  // on privilégie le statut de la popup s'il n'est pas passé
+  if (!statusEl) statusEl = document.getElementById('modalUploadStatus');
+
+  if (statusEl) statusEl.textContent = 'Envoi en cours...';
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('password', password);
+  form.append('map', currentMapId());
+
+  const resp = await fetch('/upload.php', { method:'POST', body: form, credentials: 'same-origin' });
+  const data = await resp.json().catch(()=> ({}));
+  if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP '+resp.status));
+
+  if (statusEl) statusEl.textContent = 'Fichier mis à jour ✔';
+  setTimeout(() => loadData(), 300);
+}
+
+
+
+function setupUploadModal(){
+  const fab   = document.getElementById('uploadFab');
+  const modal = document.getElementById('uploadModal');
+  const status= document.getElementById('modalUploadStatus');
+  const btn   = document.getElementById('modalUploadBtn');
+  const inpF  = document.getElementById('modalUploadExcel');
+  const inpP  = document.getElementById('modalUploadPwd');
+  const toast = document.getElementById('uploadToast');
+
+  function openModal(){
+    if (status) status.textContent = '';
+    if (inpF) inpF.value = '';
+    if (inpP) inpP.value = '';
+    modal.style.display = 'block';
+    modal.setAttribute('aria-hidden','false');
+    setTimeout(()=> inpF && inpF.focus(), 10);
+    document.addEventListener('keydown', onKey);
+  }
+  function closeModal(){
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden','true');
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e){ if (e.key === 'Escape') closeModal(); }
+
+  if (fab)   fab.addEventListener('click', openModal);
+  if (modal) modal.addEventListener('click', (e)=>{ if (e.target.dataset.close) closeModal(); });
+
+btn.addEventListener('click', async ()=>{
+  const file = inpF?.files?.[0];
+  const pwd  = (inpP?.value || '').trim();
+  if (!file) { if (status) status.textContent = 'Sélectionne un fichier .xlsx'; return; }
+  if (!pwd)  { if (status) status.textContent = 'Entre le mot de passe'; return; }
+  try{
+    if (status) status.textContent = 'Envoi en cours…';
+    await uploadExcelToServer(file, pwd, status);   // ← passe 'status' ici
+    if (status) status.textContent = 'Fichier mis à jour ✔';
+    closeModal();
+    if (toast){ toast.style.opacity = '1'; setTimeout(()=> toast.style.opacity = '0', 1800); }
+  }catch(err){
+    if (status) status.textContent = 'Erreur : ' + (err?.message || err);
+  }
+});
+}
+
+
+
+  </script>
+  
+<!-- Bouton flottant Upload -->
+<button id="uploadFab" aria-label="Téléverser un Excel"
+  style="position:fixed; left:12px; bottom:12px; z-index:1300;
+         width:44px; height:44px; border-radius:999px; border:1px solid #ddd;
+         box-shadow:0 2px 8px rgba(0,0,0,.12); background:#fff; cursor:pointer;">
+  ⬆️
+</button>
+
+<!-- Popup Upload -->
+<div id="uploadModal" aria-hidden="true" style="position:fixed; inset:0; z-index:1400; display:none;">
+  <!-- Backdrop -->
+  <div data-close="1" style="position:absolute; inset:0; background:rgba(0,0,0,.35);"></div>
+
+  <!-- Dialog -->
+  <div role="dialog" aria-modal="true" aria-labelledby="up-title"
+       style="position:relative; max-width:380px; width:92%; margin:10vh auto 0;
+              background:#fff; border-radius:12px; border:1px solid #e6e6e6;
+              box-shadow:0 10px 30px rgba(0,0,0,.18); padding:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <h3 id="up-title" style="margin:0; font-size:16px;">Mettre à jour les données</h3>
+      <button type="button" data-close="1"
+        style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;">×</button>
+    </div>
+
+    <div style="margin-top:12px; display:grid; gap:10px;">
+      <label style="display:grid; gap:6px;">
+        <span>Fichier Excel (.xlsx)</span>
+        <input id="modalUploadExcel" type="file" accept=".xlsx">
+      </label>
+
+      <label style="display:grid; gap:6px;">
+        <span>Mot de passe</span>
+        <input id="modalUploadPwd" type="password" placeholder="••••••••">
+      </label>
+
+      <div id="modalUploadStatus" style="font-size:12px; color:#666; min-height:16px;"></div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px;">
+        <button type="button" data-close="1"
+          style="background:#f5f5f5; border:1px solid #ddd; padding:6px 10px; border-radius:6px; cursor:pointer;">
+          Annuler
+        </button>
+        <button id="modalUploadBtn" type="button"
+          style="background:#007bff; color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer;">
+          Téléverser
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Petit toast de confirmation -->
+<div id="uploadToast" style="position:fixed; left:12px; bottom:70px; z-index:1500;
+    background:#333; color:#fff; padding:8px 10px; border-radius:6px; font-size:12px;
+    opacity:0; pointer-events:none; transition:opacity .25s;">
+  Fichier mis à jour ✔
+</div>
+</body>
+</html>

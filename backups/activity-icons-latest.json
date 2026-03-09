@@ -1,0 +1,168 @@
+{
+    "generated_at": "2026-03-09T16:36:52+00:00",
+    "count": 27,
+    "items": [
+        {
+            "id": "24",
+            "name": "miel",
+            "family": "apiculture",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/686/686589.png"
+        },
+        {
+            "id": "27",
+            "name": "hygiène/entretien",
+            "family": "autres",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "26",
+            "name": "oeuf",
+            "family": "autres",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/837/837560.png"
+        },
+        {
+            "id": "21",
+            "name": "boisson autre",
+            "family": "boissons",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/2405/2405479.png"
+        },
+        {
+            "id": "22",
+            "name": "vin",
+            "family": "boissons",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/2548/2548534.png"
+        },
+        {
+            "id": "23",
+            "name": "boulangerie",
+            "family": "boulangerie",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/883/883561.png"
+        },
+        {
+            "id": "15",
+            "name": "épicerie salée",
+            "family": "épicerie",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "16",
+            "name": "épicerie sucrée",
+            "family": "épicerie",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "18",
+            "name": "épices",
+            "family": "épicerie",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "17",
+            "name": "farine",
+            "family": "épicerie",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/1046/1046784.png"
+        },
+        {
+            "id": "20",
+            "name": "huile",
+            "family": "épicerie",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/2674/2674505.png"
+        },
+        {
+            "id": "19",
+            "name": "légumineuses",
+            "family": "épicerie",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "9",
+            "name": "fruit",
+            "family": "Fruits & légumes",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/601/601984.png"
+        },
+        {
+            "id": "10",
+            "name": "légume",
+            "family": "Fruits & légumes",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "25",
+            "name": "pecheur",
+            "family": "mer",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/3075/3075977.png"
+        },
+        {
+            "id": "11",
+            "name": "fromage chèvre",
+            "family": "produits laitiers",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "12",
+            "name": "fromage vache",
+            "family": "produits laitiers",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/3390/3390254.png"
+        },
+        {
+            "id": "14",
+            "name": "lait",
+            "family": "produits laitiers",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "13",
+            "name": "yaourt",
+            "family": "produits laitiers",
+            "icon_url": "/assets/icons/default-producer.svg"
+        },
+        {
+            "id": "5",
+            "name": "agneau",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/1676/1676770.png"
+        },
+        {
+            "id": "3",
+            "name": "boeuf",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/7903/7903163.png"
+        },
+        {
+            "id": "7",
+            "name": "canard",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/6101/6101149.png"
+        },
+        {
+            "id": "2",
+            "name": "charcuterie",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/12186/12186762.png"
+        },
+        {
+            "id": "1",
+            "name": "porc",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/7302/7302490.png"
+        },
+        {
+            "id": "6",
+            "name": "poulet",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/9323/9323846.png"
+        },
+        {
+            "id": "4",
+            "name": "veau",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/7903/7903163.png"
+        },
+        {
+            "id": "8",
+            "name": "viande autre",
+            "family": "viande",
+            "icon_url": "https://cdn-icons-png.flaticon.com/512/1718/1718431.png"
+        }
+    ]
+}

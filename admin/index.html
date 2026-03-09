@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin - Carte Fournisseurs</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="loginView" class="wrap login">
+    <div class="card">
+      <h1>Connexion admin</h1>
+      <label>Utilisateur <input id="loginUser" value="admin" /></label>
+      <label>Mot de passe <input id="loginPass" type="password" /></label>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnLogin" class="primary">Se connecter</button>
+        <span id="loginMsg" class="muted"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="appView" class="wrap hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h1>Gestion des données</h1>
+        <div class="row">
+          <span id="helloUser" class="muted"></span>
+          <button id="btnLogout">Se déconnecter</button>
+        </div>
+      </div>
+      <div class="muted">Crée tes référentiels, tes clients, tes fournisseurs et importe ton Excel avec détection de conflits.</div>
+    </div>
+
+    <div class="card">
+      <h3>Créer / modifier un client</h3>
+      <form id="formClient" class="grid">
+        <input type="hidden" id="clientId" />
+        <input type="hidden" id="clientLogo" />
+        <label>Nom <input id="clientName" required /></label>
+        <label>Type <input id="clientType" placeholder="AMAP / Épicerie" /></label>
+        <label>Email <input id="clientEmail" /></label>
+        <label>Téléphone <input id="clientPhone" /></label>
+        <label>Site web <input id="clientWebsite" /></label>
+        <label>Logo fichier (upload)
+          <input id="clientLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+        </label>
+        <label>Logo enregistré
+          <input id="clientLogoPath" readonly placeholder="Upload un fichier image" />
+        </label>
+        <label>Adresse <input id="clientAddress" /></label>
+        <label>Ville <input id="clientCity" /></label>
+        <label>Code postal <input id="clientPostal" /></label>
+        <label>Pays <input id="clientCountry" value="France" /></label>
+        <label>Latitude <input id="clientLat" /></label>
+        <label>Longitude <input id="clientLng" /></label>
+      </form>
+      <div id="clientLogoPreview" class="muted" style="margin-top:6px;"></div>
+      <div class="row" style="margin-top:6px;">
+        <button id="btnGeocodeClient" type="button">Géocoder adresse client</button>
+        <span class="muted">Auto si latitude/longitude vides</span>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnSaveClient" class="primary">Enregistrer client</button>
+        <span id="clientMsg" class="muted"></span>
+      </div>
+      <div id="clientsTable"></div>
+    </div>
+
+    <div class="card">
+      <h3>Paramètres visuels</h3>
+      <div class="grid-2">
+        <label>Nom organisation <input id="visOrgName" /></label>
+        <label>Logo organisation (URL) <input id="visOrgLogo" /></label>
+        <label>Icône client par défaut (URL ou /assets/...) <input id="visDefaultClient" /></label>
+        <label>Icône producteur par défaut (URL ou /assets/...) <input id="visDefaultProducer" /></label>
+        <label>Icône “vente directe ferme” (URL ou /assets/...) <input id="visFarmDirect" /></label>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnSaveVisual" class="primary">Enregistrer paramètres visuels</button>
+        <span id="visualMsg" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Catégories / Activités</h3>
+        <form id="formActivity" class="grid-2">
+          <input type="hidden" id="activityId" />
+          <input type="hidden" id="activityIcon" />
+          <label>Activité <input id="activityName" required /></label>
+          <label>Famille <input id="activityFamily" /></label>
+          <label>Icône fichier (upload)
+            <input id="activityIconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" />
+          </label>
+          <label>Icône enregistrée
+            <input id="activityIconPath" readonly placeholder="Upload un fichier image" />
+          </label>
+        </form>
+        <div id="activityIconPreview" class="muted" style="margin-top:6px;"></div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnSaveActivity" class="primary">Enregistrer activité</button>
+          <span id="activityMsg" class="muted"></span>
+        </div>
+        <div id="activitiesTable"></div>
+      </div>
+
+      <div class="card">
+        <h3>Labels</h3>
+        <form id="formLabel" class="grid-2">
+          <input type="hidden" id="labelId" />
+          <label>Label <input id="labelName" required /></label>
+          <label>Couleur (#hex) <input id="labelColor" placeholder="#28a745" /></label>
+        </form>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnSaveLabel" class="primary">Enregistrer label</button>
+          <span id="labelMsg" class="muted"></span>
+        </div>
+        <div id="labelsTable"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Créer un fournisseur</h3>
+      <form id="formSupplier" class="grid">
+        <label>Nom <input id="supplierName" required /></label>
+        <label>Type <input id="supplierType" /></label>
+        <label>Activités (séparées par ;) <input id="supplierActivities" /></label>
+        <label>Labels (séparés par ;) <input id="supplierLabels" /></label>
+        <label>Téléphone <input id="supplierPhone" /></label>
+        <label>Email <input id="supplierEmail" /></label>
+        <label>Site web <input id="supplierWebsite" /></label>
+        <label>Adresse <input id="supplierAddress" /></label>
+        <label>Ville <input id="supplierCity" /></label>
+        <label>Code postal <input id="supplierPostal" /></label>
+        <label>Pays <input id="supplierCountry" value="France" /></label>
+        <label>Latitude <input id="supplierLat" /></label>
+        <label>Longitude <input id="supplierLng" /></label>
+      </form>
+      <label style="margin-top:8px;">Clients liés (multi-sélection)
+        <select id="supplierClients" multiple size="6"></select>
+      </label>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnGeocodeSupplier" type="button">Géocoder adresse fournisseur</button>
+        <span class="muted">Auto si latitude/longitude vides</span>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnSaveSupplier" class="primary">Enregistrer fournisseur</button>
+        <span id="supplierMsg" class="muted"></span>
+      </div>
+      <div id="suppliersTable"></div>
+    </div>
+
+    <div class="card">
+      <h3>Import Excel massif</h3>
+      <div class="grid-2">
+        <label>Client cible
+          <select id="importClient"></select>
+        </label>
+        <label>Fichier Excel (.xlsx)
+          <input id="importFile" type="file" accept=".xlsx" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnPreviewImport" class="primary">Prévisualiser l'import</button>
+        <button id="btnCommitImport">Valider l'import</button>
+        <span id="importMsg" class="muted"></span>
+      </div>
+      <div id="importSummary" class="muted" style="margin-top:8px;"></div>
+      <div id="importConflicts"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
