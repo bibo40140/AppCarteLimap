@@ -3,11 +3,19 @@ body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f6f7fb;
 .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
 h1 { margin: 0 0 12px; }
 .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.tab-btn { border: 1px solid #d1d5db; background: #f9fafb; }
+.tab-btn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.hours-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mapping-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 label { font-size: 12px; color: #374151; display: grid; gap: 4px; }
 input, select, textarea, button { font: inherit; }
 input, select, textarea { padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; width: 100%; }
+textarea { min-height: 56px; }
 button { border: 1px solid #c8d0dd; background: #fff; color: #111827; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
 button.primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
 button.danger { background: #ef4444; color: #fff; border-color: #dc2626; }
@@ -19,6 +27,10 @@ th, td { border-bottom: 1px solid #eceff4; text-align: left; padding: 8px; verti
 .login { max-width: 360px; margin: 10vh auto; }
 .hidden { display: none !important; }
 .conflict { border-left: 3px solid #f59e0b; padding-left: 8px; margin: 4px 0; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.preview-table th, .preview-table td { border: 1px solid #e5e7eb; padding: 6px; }
+.preview-table th { background: #f9fafb; }
+.import-row-card { border: 1px solid #e5e7eb; }
 @media (max-width: 900px) {
-  .grid, .grid-2 { grid-template-columns: 1fr; }
+  .grid, .grid-2, .hours-grid, .mapping-grid { grid-template-columns: 1fr; }
 }

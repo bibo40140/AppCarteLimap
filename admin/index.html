@@ -33,6 +33,18 @@
     </div>
 
     <div class="card">
+      <div class="tabs" id="adminTabs">
+        <button class="tab-btn active" data-tab="clients" type="button">Clients</button>
+        <button class="tab-btn" data-tab="activities" type="button">Catégories</button>
+        <button class="tab-btn" data-tab="labels" type="button">Labels</button>
+        <button class="tab-btn" data-tab="suppliers" type="button">Fournisseurs</button>
+        <button class="tab-btn" data-tab="import" type="button">Import</button>
+        <button class="tab-btn" data-tab="visual" type="button">Visuel</button>
+      </div>
+    </div>
+
+    <section id="panel-clients" class="tab-panel active">
+      <div class="card">
       <h3>Créer / modifier un client</h3>
       <form id="formClient" class="grid">
         <input type="hidden" id="clientId" />
@@ -55,6 +67,30 @@
         <label>Latitude <input id="clientLat" /></label>
         <label>Longitude <input id="clientLng" /></label>
       </form>
+      <div class="hours-grid" style="margin-top:8px;">
+        <label>Lundi
+          <textarea id="clientMonday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Mardi
+          <textarea id="clientTuesday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Mercredi
+          <textarea id="clientWednesday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Jeudi
+          <textarea id="clientThursday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Vendredi
+          <textarea id="clientFriday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Samedi
+          <textarea id="clientSaturday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
+        </label>
+        <label>Dimanche
+          <textarea id="clientSunday" rows="2" placeholder="Fermé"></textarea>
+        </label>
+      </div>
+      <div class="muted" style="margin-top:4px;">Un créneau par ligne. Exemple: <code>08:00-12:00</code> puis <code>14:00-19:00</code>.</div>
       <div id="clientLogoPreview" class="muted" style="margin-top:6px;"></div>
       <div class="row" style="margin-top:6px;">
         <button id="btnGeocodeClient" type="button">Géocoder adresse client</button>
@@ -66,8 +102,10 @@
       </div>
       <div id="clientsTable"></div>
     </div>
+    </section>
 
-    <div class="card">
+    <section id="panel-visual" class="tab-panel">
+      <div class="card">
       <h3>Paramètres visuels</h3>
       <div class="grid-2">
         <label>Nom organisation <input id="visOrgName" /></label>
@@ -81,8 +119,9 @@
         <span id="visualMsg" class="muted"></span>
       </div>
     </div>
+    </section>
 
-    <div class="grid-2">
+    <section id="panel-activities" class="tab-panel">
       <div class="card">
         <h3>Catégories / Activités</h3>
         <form id="formActivity" class="grid-2">
@@ -104,7 +143,9 @@
         </div>
         <div id="activitiesTable"></div>
       </div>
+    </section>
 
+    <section id="panel-labels" class="tab-panel">
       <div class="card">
         <h3>Labels</h3>
         <form id="formLabel" class="grid-2">
@@ -118,9 +159,10 @@
         </div>
         <div id="labelsTable"></div>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
+    <section id="panel-suppliers" class="tab-panel">
+      <div class="card">
       <h3>Créer un fournisseur</h3>
       <form id="formSupplier" class="grid">
         <label>Nom <input id="supplierName" required /></label>
@@ -150,17 +192,50 @@
       </div>
       <div id="suppliersTable"></div>
     </div>
+    </section>
 
-    <div class="card">
+    <section id="panel-import" class="tab-panel">
+      <div class="card">
       <h3>Import Excel massif</h3>
       <div class="grid-2">
         <label>Client cible
           <select id="importClient"></select>
         </label>
         <label>Fichier Excel (.xlsx)
-          <input id="importFile" type="file" accept=".xlsx" />
+          <input id="importFile" type="file" accept=".xlsx,.xls" />
         </label>
       </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnAnalyzeImport" type="button">Analyser les colonnes</button>
+        <span id="importAnalyzeMsg" class="muted"></span>
+      </div>
+
+      <div id="importMapper" class="card" style="margin-top:10px; display:none;">
+        <h4 style="margin:0 0 8px;">Mapping des colonnes</h4>
+        <div id="importHeadersInfo" class="muted" style="margin-bottom:8px;"></div>
+        <div class="row" style="margin-bottom:8px;">
+          <label style="min-width:220px;">Ligne d'entêtes (1 = première ligne)
+            <input id="importHeaderRow" type="number" min="1" value="1" />
+          </label>
+          <button id="btnApplyHeaderRow" type="button">Appliquer cette ligne</button>
+        </div>
+        <div id="importMappingGrid" class="mapping-grid"></div>
+
+        <h4 style="margin:12px 0 8px;">Normalisation des valeurs</h4>
+        <div class="grid-2">
+          <label>Catégories / Activités
+            <textarea id="importActivityRules" rows="4" placeholder="agriculture biologique=AB&#10;fruits et légumes=légume"></textarea>
+          </label>
+          <label>Labels
+            <textarea id="importLabelRules" rows="4" placeholder="agriculture biologique=AB&#10;label bio=AB"></textarea>
+          </label>
+        </div>
+        <div class="muted">Format: une règle par ligne, <code>source=valeur finale</code>.</div>
+
+        <h4 style="margin:12px 0 8px;">Aperçu transformé (10 lignes)</h4>
+        <div id="importTransformedPreview" class="muted"></div>
+      </div>
+
       <div class="row" style="margin-top:8px;">
         <button id="btnPreviewImport" class="primary">Prévisualiser l'import</button>
         <button id="btnCommitImport">Valider l'import</button>
@@ -169,6 +244,7 @@
       <div id="importSummary" class="muted" style="margin-top:8px;"></div>
       <div id="importConflicts"></div>
     </div>
+    </section>
   </div>
 
   <script src="app.js"></script>

@@ -222,6 +222,13 @@ function save_client(PDO $pdo): void
         ':longitude' => ($input['longitude'] ?? '') !== '' ? (float)$input['longitude'] : null,
         ':phone' => trim((string)($input['phone'] ?? '')),
         ':email' => trim((string)($input['email'] ?? '')),
+        ':lundi' => array_key_exists('lundi', $input) ? trim((string)$input['lundi']) : null,
+        ':mardi' => array_key_exists('mardi', $input) ? trim((string)$input['mardi']) : null,
+        ':mercredi' => array_key_exists('mercredi', $input) ? trim((string)$input['mercredi']) : null,
+        ':jeudi' => array_key_exists('jeudi', $input) ? trim((string)$input['jeudi']) : null,
+        ':vendredi' => array_key_exists('vendredi', $input) ? trim((string)$input['vendredi']) : null,
+        ':samedi' => array_key_exists('samedi', $input) ? trim((string)$input['samedi']) : null,
+        ':dimanche' => array_key_exists('dimanche', $input) ? trim((string)$input['dimanche']) : null,
         ':website' => trim((string)($input['website'] ?? '')),
         ':logo_url' => trim((string)($input['logo_url'] ?? '')),
         ':is_active' => !empty($input['is_active']) ? 1 : 0,
@@ -232,14 +239,17 @@ function save_client(PDO $pdo): void
         $sql = "UPDATE clients SET
             name=:name, client_type=:client_type, address=:address, city=:city, postal_code=:postal_code,
             country=:country, latitude=:latitude, longitude=:longitude, phone=:phone, email=:email,
+            lundi=COALESCE(:lundi, lundi), mardi=COALESCE(:mardi, mardi), mercredi=COALESCE(:mercredi, mercredi),
+            jeudi=COALESCE(:jeudi, jeudi), vendredi=COALESCE(:vendredi, vendredi),
+            samedi=COALESCE(:samedi, samedi), dimanche=COALESCE(:dimanche, dimanche),
             website=:website, logo_url=:logo_url, is_active=:is_active
             WHERE id=:id";
         $pdo->prepare($sql)->execute($payload);
     } else {
         $sql = "INSERT INTO clients
-            (name, client_type, address, city, postal_code, country, latitude, longitude, phone, email, website, logo_url, is_active)
+            (name, client_type, address, city, postal_code, country, latitude, longitude, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website, logo_url, is_active)
             VALUES
-            (:name, :client_type, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :website, :logo_url, :is_active)";
+            (:name, :client_type, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :lundi, :mardi, :mercredi, :jeudi, :vendredi, :samedi, :dimanche, :website, :logo_url, :is_active)";
         $pdo->prepare($sql)->execute($payload);
     }
 
@@ -805,7 +815,7 @@ function map_data(PDO $pdo): void
         $settings[$row['setting_key']] = $row['setting_value'];
     }
 
-    $clients = $pdo->query('SELECT id, name, client_type, latitude, longitude, logo_url, city, address, postal_code, phone, email, website FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
+    $clients = $pdo->query('SELECT id, name, client_type, latitude, longitude, logo_url, city, address, postal_code, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
 
     $activities = $pdo->query('SELECT name, family, icon_url FROM activities WHERE is_active=1')->fetchAll();
     $labels = $pdo->query('SELECT name, color FROM labels WHERE is_active=1')->fetchAll();

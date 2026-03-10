@@ -1124,7 +1124,7 @@ allClients.forEach(e => {
       );
     }
 
-    // === 12) Chargement des données (BDD puis fallback XLSX) ===
+    // === 12) Chargement des données (BDD uniquement) ===
 function loadData() {
 fetch('/api/index.php?action=map-data&v=' + Date.now())
     .then(resp => {
@@ -1188,8 +1188,12 @@ fetch('/api/index.php?action=map-data&v=' + Date.now())
       renderBrand(orgLogoUrl, orgName);
     })
     .catch(err => {
-      console.warn('API BDD indisponible, fallback Excel :', err);
-      loadDataFromExcel();
+      console.error('API BDD indisponible (mode BDD uniquement) :', err);
+      markerCluster.clearLayers();
+      clientLayer.clearLayers();
+      allData = [];
+      allClients = [];
+      renderRightPaneList();
     });
 }
 
@@ -1434,7 +1438,11 @@ map.whenReady(() => {
   updateClientsVisibilityAndSize();
 });
 
-	  setupUploadModal();
+      // Mode BDD-only: hide legacy map-side Excel upload UI.
+      const fab = document.getElementById('uploadFab');
+      const modal = document.getElementById('uploadModal');
+      if (fab) fab.style.display = 'none';
+      if (modal) modal.style.display = 'none';
 	  
 
 	};
