@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Espace Client - Carte Fournisseurs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section id="loginView" class="card auth-card">
+      <h1>Espace client</h1>
+      <p class="muted">Connectez-vous pour gérer votre relation fournisseur.</p>
+      <label>
+        Utilisateur
+        <input id="loginUser" autocomplete="username" />
+      </label>
+      <label>
+        Mot de passe
+        <input id="loginPass" type="password" autocomplete="current-password" />
+      </label>
+      <div class="row">
+        <button id="btnLogin" class="primary" type="button">Se connecter</button>
+        <span id="loginMsg" class="msg"></span>
+      </div>
+    </section>
+
+    <section id="appView" class="hidden">
+      <header class="card topbar">
+        <div>
+          <h2 id="clientTitle"><span id="clientTitleText">Mon espace</span> <span id="pendingBadge" class="pending-badge hidden"></span></h2>
+          <p id="clientMeta" class="muted"></p>
+        </div>
+        <div class="row">
+          <span id="helloUser" class="muted"></span>
+          <button id="btnLogout" type="button">Se déconnecter</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="card panel list-panel">
+          <h3>Fournisseurs liés</h3>
+          <input id="searchSupplier" placeholder="Rechercher un fournisseur..." />
+          <div id="suppliersList" class="list"></div>
+        </aside>
+
+        <section class="card panel">
+          <h3 id="editorTitle">Profil client fournisseur</h3>
+          <p id="editorHint" class="muted">Sélectionnez un fournisseur à gauche.</p>
+
+          <div id="supplierGlobal" class="global-box hidden"></div>
+
+          <form id="profileForm" class="hidden" onsubmit="return false;">
+            <input type="hidden" id="profileSupplierId" />
+            <label>
+              Activités client
+              <div class="multi-picker">
+                <div id="profileActivityChips" class="multi-chip-list"></div>
+                <select id="profileActivitySelect" multiple size="6" data-chip-target="profileActivityChips"></select>
+              </div>
+            </label>
+            <label>
+              Labels client
+              <div class="multi-picker">
+                <div id="profileLabelsChips" class="multi-chip-list"></div>
+                <select id="profileLabelsSelect" multiple size="6" data-chip-target="profileLabelsChips"></select>
+              </div>
+            </label>
+            <label>
+              Statut relation
+              <select id="profileRelationshipStatus">
+                <option value="active">active</option>
+                <option value="prospect">prospect</option>
+                <option value="inactive">inactive</option>
+                <option value="blocked">blocked</option>
+              </select>
+            </label>
+            <label>
+              Notes client
+              <textarea id="profileNotes" rows="5" placeholder="Notes internes client"></textarea>
+            </label>
+            <div class="row">
+              <button id="btnSaveProfile" class="primary" type="button">Enregistrer le profil</button>
+              <span id="profileMsg" class="msg"></span>
+            </div>
+          </form>
+
+          <section id="changeRequestSection" class="hidden" style="margin-top:14px;">
+            <h4>Demander une modification de la fiche globale</h4>
+            <p class="muted">Ces changements seront validés ou refusés par un administrateur.</p>
+            <form id="changeRequestForm" onsubmit="return false;">
+              <label>
+                Champ à modifier
+                <select id="changeRequestField">
+                  <option value="name">Nom</option>
+                  <option value="address">Adresse</option>
+                  <option value="city">Ville</option>
+                  <option value="postal_code">Code postal</option>
+                  <option value="country">Pays</option>
+                  <option value="phone">Téléphone</option>
+                  <option value="email">Email</option>
+                  <option value="website">Site web</option>
+                  <option value="supplier_type">Type fournisseur</option>
+                  <option value="activity_text">Activités globales</option>
+                  <option value="labels">Labels globaux</option>
+                </select>
+              </label>
+              <label>
+                Nouvelle valeur
+                <textarea id="changeRequestNewValue" rows="3" placeholder="Saisir la valeur proposée"></textarea>
+                <select id="changeRequestSupplierType" class="hidden"></select>
+                <div class="multi-picker hidden" id="changeRequestActivitiesWrap">
+                  <div id="changeRequestActivitiesChips" class="multi-chip-list"></div>
+                  <select id="changeRequestActivities" multiple size="6" data-chip-target="changeRequestActivitiesChips"></select>
+                </div>
+                <div class="multi-picker hidden" id="changeRequestLabelsWrap">
+                  <div id="changeRequestLabelsChips" class="multi-chip-list"></div>
+                  <select id="changeRequestLabels" multiple size="6" data-chip-target="changeRequestLabelsChips"></select>
+                </div>
+              </label>
+              <div class="row">
+                <button id="btnSaveChangeRequest" type="button">Soumettre la demande</button>
+                <span id="changeRequestMsg" class="msg"></span>
+              </div>
+            </form>
+
+            <div style="margin-top:12px;">
+              <h4 style="margin-bottom:6px;">Historique des demandes</h4>
+              <div class="row" style="margin-bottom:6px;">
+                <label style="margin:0; min-width: 220px;">
+                  Filtrer par statut
+                  <select id="changeRequestStatusFilter">
+                    <option value="all">Tous</option>
+                    <option value="pending">En attente</option>
+                    <option value="approved">Approuvées</option>
+                    <option value="rejected">Refusées</option>
+                  </select>
+                </label>
+                <span id="changeRequestSummary" class="muted"></span>
+              </div>
+              <div id="changeRequestsList" class="list"></div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

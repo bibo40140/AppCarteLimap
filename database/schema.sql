@@ -126,6 +126,77 @@ CREATE TABLE IF NOT EXISTS import_conflicts (
   CONSTRAINT fk_import_conflicts_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS client_users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_id INT NOT NULL,
+  username VARCHAR(120) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(30) NOT NULL DEFAULT 'client_manager',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_client_users_username (username),
+  INDEX idx_client_users_client (client_id),
+  CONSTRAINT fk_client_users_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_supplier_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_id INT NOT NULL,
+  supplier_id INT NOT NULL,
+  activity_text VARCHAR(255) NULL,
+  labels_text VARCHAR(255) NULL,
+  notes TEXT NULL,
+  relationship_status VARCHAR(30) NOT NULL DEFAULT 'active',
+  updated_by_type VARCHAR(20) NOT NULL DEFAULT 'admin',
+  updated_by_id INT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_client_supplier_profile (client_id, supplier_id),
+  INDEX idx_client_supplier_profiles_supplier (supplier_id),
+  CONSTRAINT fk_client_supplier_profiles_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_client_supplier_profiles_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS supplier_change_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  supplier_id INT NOT NULL,
+  client_id INT NOT NULL,
+  requested_by_user_id INT NOT NULL,
+  field_name VARCHAR(80) NOT NULL,
+  old_value TEXT NULL,
+  new_value TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  reviewed_by_admin VARCHAR(120) NULL,
+  reviewed_at TIMESTAMP NULL,
+  review_note TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_supplier_change_requests_supplier (supplier_id),
+  INDEX idx_supplier_change_requests_client (client_id),
+  INDEX idx_supplier_change_requests_status (status),
+  CONSTRAINT fk_supplier_change_requests_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_supplier_change_requests_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_supplier_change_requests_user FOREIGN KEY (requested_by_user_id) REFERENCES client_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS supplier_audit_log (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  supplier_id INT NOT NULL,
+  actor_type VARCHAR(20) NOT NULL,
+  actor_id INT NULL,
+  actor_name VARCHAR(120) NULL,
+  action_name VARCHAR(60) NOT NULL,
+  field_name VARCHAR(80) NULL,
+  old_value TEXT NULL,
+  new_value TEXT NULL,
+  meta_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_supplier_audit_supplier (supplier_id),
+  INDEX idx_supplier_audit_created_at (created_at),
+  CONSTRAINT fk_supplier_audit_log_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO settings (setting_key, setting_value)
 VALUES
   ('org_name', 'Carte Fournisseurs'),

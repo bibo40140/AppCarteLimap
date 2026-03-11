@@ -44,12 +44,107 @@ function normalize_phone(?string $value): string
     return preg_replace('/\D+/', '', $value ?? '');
 }
 
+function format_phone(?string $value): string
+{
+    $rawInput = trim((string)($value ?? ''));
+    if ($rawInput === '') {
+        return '';
+    }
+
+    $parts = preg_split('/\s*(?:\/|,|;|\||\r\n|\r|\n)+\s*/u', $rawInput, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    if (count($parts) > 1) {
+        $formatted = [];
+        foreach ($parts as $part) {
+            $piece = format_phone($part);
+            if ($piece !== '') {
+                $formatted[] = $piece;
+            }
+        }
+        $formatted = array_values(array_unique($formatted));
+        return implode(' / ', $formatted);
+    }
+
+    $raw = $rawInput;
+
+    $digits = normalize_phone($raw);
+    if ($digits === '') {
+        return '';
+    }
+
+    if (str_starts_with($digits, '0033') && strlen($digits) === 13) {
+        $digits = '33' . substr($digits, 4);
+    }
+
+    if (preg_match('/^\d{9}$/', $digits)) {
+        $digits = '0' . $digits;
+    }
+
+    if (preg_match('/^0\d{9}$/', $digits)) {
+        return trim(implode(' ', str_split($digits, 2)));
+    }
+
+    if (preg_match('/^33\d{9}$/', $digits)) {
+        $national = substr($digits, 2);
+        return '+33 ' . substr($national, 0, 1) . ' ' . trim(implode(' ', str_split(substr($national, 1), 2)));
+    }
+
+    if (strlen($digits) >= 10 && strlen($digits) % 2 === 0) {
+        $prefix = str_starts_with($raw, '+') ? '+' : '';
+        return $prefix . trim(implode(' ', str_split($digits, 2)));
+    }
+
+    return $raw;
+}
+
 function require_admin(): void
 {
     start_app_session();
     if (empty($_SESSION['is_admin'])) {
         json_response(['ok' => false, 'error' => 'Non autorisé'], 401);
     }
+}
+
+function require_client_or_admin(): void
+{
+    start_app_session();
+    if (!empty($_SESSION['is_admin'])) {
+        return;
+    }
+    if (!empty($_SESSION['is_client_user'])) {
+        return;
+    }
+    json_response(['ok' => false, 'error' => 'Non autorisé'], 401);
+}
+
+function current_actor_context(): array
+{
+    start_app_session();
+    if (!empty($_SESSION['is_admin'])) {
+        return [
+            'actor_type' => 'admin',
+            'actor_id' => null,
+            'actor_name' => (string)($_SESSION['admin_username'] ?? 'admin'),
+            'client_id' => null,
+            'client_role' => 'admin',
+        ];
+    }
+    if (!empty($_SESSION['is_client_user'])) {
+        return [
+            'actor_type' => 'client_user',
+            'actor_id' => isset($_SESSION['client_user_id']) ? (int)$_SESSION['client_user_id'] : null,
+            'actor_name' => (string)($_SESSION['client_username'] ?? 'client_user'),
+            'client_id' => isset($_SESSION['client_id']) ? (int)$_SESSION['client_id'] : null,
+            'client_role' => (string)($_SESSION['client_role'] ?? 'client_reader'),
+        ];
+    }
+
+    return [
+        'actor_type' => 'anonymous',
+        'actor_id' => null,
+        'actor_name' => 'anonymous',
+        'client_id' => null,
+        'client_role' => null,
+    ];
 }
 
 function parse_csv_list($value): array

@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin - Carte Fournisseurs</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
   <div id="loginView" class="wrap login">
@@ -37,7 +39,9 @@
         <button class="tab-btn active" data-tab="clients" type="button">Clients</button>
         <button class="tab-btn" data-tab="activities" type="button">Catégories</button>
         <button class="tab-btn" data-tab="labels" type="button">Labels</button>
+        <button class="tab-btn" data-tab="types" type="button">Types</button>
         <button class="tab-btn" data-tab="suppliers" type="button">Fournisseurs</button>
+        <button class="tab-btn" data-tab="requests" type="button">Demandes</button>
         <button class="tab-btn" data-tab="import" type="button">Import</button>
         <button class="tab-btn" data-tab="visual" type="button">Visuel</button>
       </div>
@@ -102,6 +106,38 @@
       </div>
       <div id="clientsTable"></div>
     </div>
+
+    <div class="card" style="margin-top:10px;">
+      <h3>Comptes utilisateurs client</h3>
+      <form id="formClientUser" class="grid-2">
+        <input type="hidden" id="clientUserId" />
+        <label>Client
+          <select id="clientUserClientId"></select>
+        </label>
+        <label>Nom utilisateur
+          <input id="clientUserUsername" placeholder="ex: amap_labenne" />
+        </label>
+        <label>Rôle
+          <select id="clientUserRole">
+            <option value="client_manager">client_manager</option>
+            <option value="client_editor">client_editor</option>
+            <option value="client_reader">client_reader</option>
+          </select>
+        </label>
+        <label>Mot de passe (laisser vide pour conserver l'actuel en édition)
+          <input id="clientUserPassword" type="password" placeholder="8 caractères minimum" />
+        </label>
+      </form>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="clientUserIsActive" type="checkbox" checked />
+        Compte actif
+      </label>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnSaveClientUser" class="primary" type="button">Enregistrer utilisateur client</button>
+        <span id="clientUserMsg" class="muted"></span>
+      </div>
+      <div id="clientUsersTable"></div>
+    </div>
     </section>
 
     <section id="panel-visual" class="tab-panel">
@@ -161,10 +197,26 @@
       </div>
     </section>
 
+    <section id="panel-types" class="tab-panel">
+      <div class="card">
+        <h3>Types de fournisseurs</h3>
+        <form id="formType" class="grid-2">
+          <input type="hidden" id="typeId" />
+          <label>Nom du type <input id="typeName" required placeholder="ex: Producteur, Artisan, Transformateur" /></label>
+        </form>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnSaveType" class="primary">Enregistrer type</button>
+          <span id="typeMsg" class="muted"></span>
+        </div>
+        <div id="typesTable"></div>
+      </div>
+    </section>
+
     <section id="panel-suppliers" class="tab-panel">
       <div class="card">
       <h3>Créer un fournisseur</h3>
       <form id="formSupplier" class="grid">
+        <input type="hidden" id="supplierId" />
         <label>Nom <input id="supplierName" required /></label>
         <label>Type <input id="supplierType" /></label>
         <label>Activités (séparées par ;) <input id="supplierActivities" /></label>
@@ -192,6 +244,52 @@
       </div>
       <div id="suppliersTable"></div>
     </div>
+    </section>
+
+    <section id="panel-requests" class="tab-panel">
+      <div class="card">
+        <h3>Demandes de modification (champs globaux)</h3>
+        <div class="grid-2">
+          <label>Filtrer par statut
+            <select id="requestStatusFilter">
+              <option value="all">Tous</option>
+              <option value="pending">En attente</option>
+              <option value="approved">Approuvées</option>
+              <option value="rejected">Refusées</option>
+            </select>
+          </label>
+          <label>Filtrer par client
+            <select id="requestClientFilter">
+              <option value="">Tous les clients</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid-2" style="margin-top:8px;">
+          <label>Trier
+            <select id="requestSortBy">
+              <option value="created_at_desc">Date (plus récente)</option>
+              <option value="created_at_asc">Date (plus ancienne)</option>
+              <option value="client_asc">Client (A-Z)</option>
+              <option value="supplier_asc">Fournisseur (A-Z)</option>
+              <option value="status_asc">Statut</option>
+            </select>
+          </label>
+          <label>
+            <span>&nbsp;</span>
+            <button id="btnReloadRequests" type="button">Rafraîchir les demandes</button>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnBulkApproveRequests" type="button">Approuver toutes les demandes filtrées en attente</button>
+          <button id="btnBulkApproveSelected" type="button">Approuver la sélection</button>
+          <button id="btnBulkRejectSelected" type="button" class="danger">Refuser la sélection</button>
+          <button id="btnExportRequestsCsv" type="button">Exporter CSV</button>
+          <span id="requestSummary" class="muted"></span>
+          <span id="requestSelectionSummary" class="muted"></span>
+        </div>
+        <div id="requestMsg" class="muted" style="margin-top:8px;"></div>
+        <div id="requestsTable" style="margin-top:8px;"></div>
+      </div>
     </section>
 
     <section id="panel-import" class="tab-panel">
@@ -238,13 +336,113 @@
 
       <div class="row" style="margin-top:8px;">
         <button id="btnPreviewImport" class="primary">Prévisualiser l'import</button>
-        <button id="btnCommitImport">Valider l'import</button>
+        <label style="margin-left:8px; display:flex; align-items:center; gap:6px; font-size:12px;">
+          <input id="importAutoGeocode" type="checkbox" checked style="width:auto;" />
+          Géocoder automatiquement les lignes sans latitude/longitude au moment de l'import
+        </label>
         <span id="importMsg" class="muted"></span>
       </div>
+      <div id="importLoader" class="import-loader hidden" style="margin-top:8px;">
+        <div class="import-loader-spinner"></div>
+        <div>
+          <div id="importLoaderTitle"><strong>Prévisualisation en cours...</strong></div>
+          <div id="importLoaderDetail" class="muted">Lecture du fichier</div>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:6px;">
+        Après prévisualisation, tu peux corriger toutes les cellules ligne par ligne avant validation.
+        Les champs catégorie/label/type peuvent être harmonisés avec les valeurs déjà enregistrées dans l'app.
+      </div>
+      <div id="importPreflight" class="card hidden" style="margin-top:8px;">
+        <h4 style="margin:0 0 8px;">Alerte doublons détectés dans le fichier</h4>
+        <div id="importPreflightSummary" class="muted" style="margin-bottom:8px;"></div>
+        <div id="importPreflightGrid"></div>
+        <div class="row" style="margin-top:8px; justify-content:flex-end;">
+          <button id="btnApplyPreflight" type="button" class="primary">Appliquer ces choix</button>
+        </div>
+      </div>
+      <div id="importGridToolbar" class="card" style="margin-top:8px; display:none;">
+        <h4 style="margin:0 0 8px;">Edition en grille + actions de masse</h4>
+        <div class="grid-2">
+          <label>Filtrer (nom, ville, email, téléphone)
+            <input id="importFilterText" placeholder="Rechercher..." />
+          </label>
+          <label>Statut
+            <select id="importFilterStatus">
+              <option value="all">Tous</option>
+              <option value="incomplete">A completer</option>
+              <option value="conflict">En conflit</option>
+              <option value="geocode">Sans coordonnées</option>
+              <option value="existing">Fournisseurs existants</option>
+              <option value="new">Nouveaux fournisseurs</option>
+            </select>
+          </label>
+        </div>
+        <div class="grid-2" style="margin-top:8px;">
+          <label>Type producteur à appliquer (lignes filtrées)
+            <div class="picker-row">
+              <select id="bulkTypeValue"></select>
+              <button id="btnBulkApplyType" type="button">Appliquer type</button>
+            </div>
+          </label>
+          <label>Label à ajouter (lignes filtrées)
+            <div class="picker-row">
+              <select id="bulkLabelValue"></select>
+              <button id="btnBulkAppendLabel" type="button">Ajouter label</button>
+            </div>
+          </label>
+        </div>
+        <div class="grid-2" style="margin-top:8px;">
+          <label>Catégorie/activité à ajouter (lignes filtrées)
+            <div class="picker-row">
+              <select id="bulkActivityValue"></select>
+              <button id="btnBulkAppendActivity" type="button">Ajouter activité</button>
+            </div>
+          </label>
+          <label>Pays à appliquer (lignes filtrées)
+            <div class="picker-row">
+              <input id="bulkCountryValue" placeholder="France" />
+              <button id="btnBulkApplyCountry" type="button">Appliquer pays</button>
+            </div>
+          </label>
+        </div>
+        <div id="importGridInfo" class="muted" style="margin-top:8px;"></div>
+      </div>
       <div id="importSummary" class="muted" style="margin-top:8px;"></div>
+      <div id="dbDupAlert" class="card hidden" style="margin-top:8px;">
+        <h4 style="margin:0 0 8px;">Doublons détectés avec la base</h4>
+        <div id="dbDupSummary" class="muted" style="margin-bottom:8px;"></div>
+        <div id="dbDupGrid"></div>
+      </div>
+      <div id="previewGeocodeActions" class="row hidden" style="margin-top:8px;">
+        <button id="btnRunPreviewGeocode" type="button">Lancer le géocodage maintenant</button>
+        <span class="muted">Tu peux gérer les doublons/conflits d'abord, puis lancer le géocodage en arrière-plan.</span>
+      </div>
+      <div id="importGeocodeProgress" style="margin-top:6px;"></div>
       <div id="importConflicts"></div>
+      <div id="importCommitArea" class="card hidden" style="margin-top:10px;">
+        <div id="importValidationMsg" class="muted" style="margin-bottom:8px;"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button id="btnCommitImport">Valider l'import</button>
+        </div>
+      </div>
     </div>
     </section>
+  </div>
+
+  <div id="mapEditorModal" class="map-modal hidden">
+    <div class="map-modal-backdrop" data-map-close></div>
+    <div class="map-modal-card">
+      <div class="row" style="justify-content:space-between;">
+        <h3 id="mapEditorTitle" style="margin:0;">Ajuster la position</h3>
+        <button type="button" id="btnMapEditorClose" data-map-close>Fermer</button>
+      </div>
+      <div class="muted" id="mapEditorHelp" style="margin-top:6px;">Déplace le pin à l'emplacement exact du producteur puis clique sur Enregistrer.</div>
+      <div id="mapEditorCanvas" class="map-canvas"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:8px;">
+        <button type="button" id="btnMapEditorSave" class="primary">Enregistrer cette position</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
