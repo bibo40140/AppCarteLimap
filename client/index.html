@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Espace Client - Carte Fournisseurs</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
   <main class="page">
@@ -23,13 +24,45 @@
         <button id="btnLogin" class="primary" type="button">Se connecter</button>
         <span id="loginMsg" class="msg"></span>
       </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnShowForgot" type="button">Mot de passe oublié ?</button>
+      </div>
+
+      <div id="forgotView" class="hidden" style="margin-top:12px;">
+        <label>
+          Votre email utilisateur
+          <input id="forgotEmail" type="email" placeholder="utilisateur@domaine.fr" />
+        </label>
+        <div class="row">
+          <button id="btnForgotSubmit" type="button">Envoyer le lien</button>
+          <span id="forgotMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div id="resetView" class="hidden" style="margin-top:12px;">
+        <label>
+          Nouveau mot de passe
+          <input id="resetPassword" type="password" autocomplete="new-password" />
+        </label>
+        <label>
+          Confirmer le mot de passe
+          <input id="resetPasswordConfirm" type="password" autocomplete="new-password" />
+        </label>
+        <div class="row">
+          <button id="btnResetSubmit" type="button">Définir le mot de passe</button>
+          <span id="resetMsg" class="msg"></span>
+        </div>
+      </div>
     </section>
 
     <section id="appView" class="hidden">
       <header class="card topbar">
-        <div>
+        <div class="topbar-main">
+          <div id="clientHeaderLogo" class="client-header-logo muted">Logo</div>
+          <div>
           <h2 id="clientTitle"><span id="clientTitleText">Mon espace</span> <span id="pendingBadge" class="pending-badge hidden"></span></h2>
           <p id="clientMeta" class="muted"></p>
+          </div>
         </div>
         <div class="row">
           <span id="helloUser" class="muted"></span>
@@ -37,9 +70,170 @@
         </div>
       </header>
 
-      <div class="layout">
+      <section class="card" style="margin-bottom:14px;">
+        <div class="tabs" id="clientTabs">
+          <button class="tab-btn active" data-tab="my-data" type="button">Mes données</button>
+          <button class="tab-btn" data-tab="my-suppliers" type="button">Mes fournisseurs</button>
+          <button class="tab-btn" data-tab="new-supplier" type="button">Nouveau fournisseur</button>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel active" id="panel-my-data" style="margin-bottom:14px;">
+        <h3>Mes informations client</h3>
+        <p class="muted">Mettez à jour votre fiche client (coordonnées visibles dans les exports).</p>
+        <form id="clientInfoForm" class="grid-2" onsubmit="return false;">
+          <label>Nom client
+            <input id="clientInfoName" />
+          </label>
+          <label>Type
+            <input id="clientInfoType" placeholder="AMAP / Épicerie" />
+          </label>
+          <label>Email
+            <input id="clientInfoEmail" />
+          </label>
+          <label>Téléphone
+            <input id="clientInfoPhone" />
+          </label>
+          <label>Site web
+            <input id="clientInfoWebsite" />
+          </label>
+          <label>Facebook
+            <input id="clientInfoFacebook" placeholder="https://facebook.com/..." />
+          </label>
+          <label>Instagram
+            <input id="clientInfoInstagram" placeholder="https://instagram.com/..." />
+          </label>
+          <label>Charger un logo (image)
+            <input id="clientInfoLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+            <input id="clientInfoLogoPath" readonly placeholder="Aucun fichier sélectionné" />
+          </label>
+          <label>Adresse
+            <input id="clientInfoAddress" />
+          </label>
+          <label>Ville
+            <input id="clientInfoCity" />
+          </label>
+          <label>Code postal
+            <input id="clientInfoPostal" />
+          </label>
+          <label>Pays
+            <input id="clientInfoCountry" value="France" />
+          </label>
+          <label>Latitude
+            <input id="clientInfoLat" />
+          </label>
+          <label>Longitude
+            <input id="clientInfoLng" />
+          </label>
+          <label>Texte court
+            <textarea id="clientInfoDescriptionShort" rows="3" placeholder="Résumé pour le site"></textarea>
+          </label>
+          <label>Texte long
+            <div class="editor-toolbar" id="clientInfoLongEditorToolbar">
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H2">Titre</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H3">Sous-titre</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="P">Texte</button>
+              <button type="button" data-editor-cmd="bold">Gras</button>
+              <button type="button" data-editor-cmd="insertUnorderedList">Liste</button>
+            </div>
+            <div id="clientInfoDescriptionLongEditor" class="rich-editor" contenteditable="true"></div>
+            <textarea id="clientInfoDescriptionLong" rows="5" class="hidden" placeholder="Présentation détaillée pour le site"></textarea>
+          </label>
+        </form>
+        <div id="clientInfoMap" class="client-map" style="margin-top:8px;"></div>
+        <div class="row">
+          <button id="btnClientGeocode" type="button">Géocoder l'adresse</button>
+          <button id="btnSaveClientInfo" class="primary" type="button">Mettre à jour ma fiche client</button>
+          <span id="clientInfoMsg" class="msg"></span>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel" id="panel-new-supplier" style="margin-bottom:14px;">
+        <h3>Proposer un nouveau fournisseur</h3>
+        <p class="muted">La création sera validée par un administrateur avant publication.</p>
+        <form id="supplierCreateRequestForm" class="grid-2" onsubmit="return false;">
+          <label>Nom fournisseur
+            <input id="newSupplierName" required />
+          </label>
+          <label>Type
+            <select id="newSupplierType"></select>
+          </label>
+          <label>Activités
+            <div class="multi-picker">
+              <div id="newSupplierActivitiesChips" class="multi-chip-list"></div>
+              <select id="newSupplierActivities" data-chip-target="newSupplierActivitiesChips"></select>
+            </div>
+          </label>
+          <label>Labels
+            <div class="multi-picker">
+              <div id="newSupplierLabelsChips" class="multi-chip-list"></div>
+              <select id="newSupplierLabels" data-chip-target="newSupplierLabelsChips"></select>
+            </div>
+          </label>
+          <label>Adresse
+            <input id="newSupplierAddress" />
+          </label>
+          <label>Ville
+            <input id="newSupplierCity" />
+          </label>
+          <label>Code postal
+            <input id="newSupplierPostal" />
+          </label>
+          <label>Pays
+            <input id="newSupplierCountry" value="France" />
+          </label>
+          <label>Téléphone
+            <input id="newSupplierPhone" />
+          </label>
+          <label>Email
+            <input id="newSupplierEmail" />
+          </label>
+          <label>Site web
+            <input id="newSupplierWebsite" />
+          </label>
+          <label>Notes
+            <textarea id="newSupplierNotes" rows="3" placeholder="Infos utiles pour l'admin"></textarea>
+          </label>
+        </form>
+        <div class="row">
+          <button id="btnCreateSupplierRequest" type="button">Soumettre une demande de création</button>
+          <span id="supplierCreateMsg" class="msg"></span>
+        </div>
+        <div style="margin-top:12px;">
+          <h4 style="margin-bottom:6px;">Historique des demandes de création</h4>
+          <div id="supplierCreateRequestsList" class="list"></div>
+        </div>
+
+        <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb;" />
+
+        <h3>Rattacher un fournisseur déjà existant</h3>
+        <p class="muted">Si le fournisseur existe déjà dans la base globale, envoyez une demande de rattachement au lieu de créer un doublon.</p>
+        <div class="grid-2">
+          <label>Rechercher un fournisseur global
+            <input id="linkSupplierSearch" placeholder="Nom, ville, code postal..." />
+          </label>
+          <label>Note (optionnelle)
+            <input id="linkSupplierNote" placeholder="Précision pour l'admin" />
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnSearchLinkSupplier" type="button">Rechercher</button>
+          <span id="linkSupplierMsg" class="msg"></span>
+        </div>
+        <div id="linkSupplierSearchResults" class="list" style="margin-top:8px;"></div>
+
+        <div style="margin-top:12px;">
+          <h4 style="margin-bottom:6px;">Historique des demandes de rattachement</h4>
+          <div id="supplierLinkRequestsList" class="list"></div>
+        </div>
+      </section>
+
+      <div class="layout client-tab-panel" id="panel-my-suppliers">
         <aside class="card panel list-panel">
-          <h3>Fournisseurs liés</h3>
+          <div class="row" style="justify-content:space-between;">
+            <h3 style="margin:0;">Fournisseurs liés</h3>
+            <button id="btnGoNewSupplier" type="button">+ Nouveau</button>
+          </div>
           <input id="searchSupplier" placeholder="Rechercher un fournisseur..." />
           <div id="suppliersList" class="list"></div>
         </aside>
@@ -53,17 +247,17 @@
           <form id="profileForm" class="hidden" onsubmit="return false;">
             <input type="hidden" id="profileSupplierId" />
             <label>
-              Activités client
+              Activités
               <div class="multi-picker">
                 <div id="profileActivityChips" class="multi-chip-list"></div>
-                <select id="profileActivitySelect" multiple size="6" data-chip-target="profileActivityChips"></select>
+                <select id="profileActivitySelect" data-chip-target="profileActivityChips"></select>
               </div>
             </label>
             <label>
-              Labels client
+              Labels
               <div class="multi-picker">
                 <div id="profileLabelsChips" class="multi-chip-list"></div>
-                <select id="profileLabelsSelect" multiple size="6" data-chip-target="profileLabelsChips"></select>
+                <select id="profileLabelsSelect" data-chip-target="profileLabelsChips"></select>
               </div>
             </label>
             <label>
@@ -100,6 +294,14 @@
                   <option value="phone">Téléphone</option>
                   <option value="email">Email</option>
                   <option value="website">Site web</option>
+                  <option value="facebook_url">Facebook</option>
+                  <option value="instagram_url">Instagram</option>
+                  <option value="linkedin_url">LinkedIn</option>
+                  <option value="logo_url">Logo (URL)</option>
+                  <option value="photo_cover_url">Image de couverture (URL)</option>
+                  <option value="slug">Slug public</option>
+                  <option value="description_short">Description courte</option>
+                  <option value="description_long">Description longue</option>
                   <option value="supplier_type">Type fournisseur</option>
                   <option value="activity_text">Activités globales</option>
                   <option value="labels">Labels globaux</option>
@@ -111,11 +313,11 @@
                 <select id="changeRequestSupplierType" class="hidden"></select>
                 <div class="multi-picker hidden" id="changeRequestActivitiesWrap">
                   <div id="changeRequestActivitiesChips" class="multi-chip-list"></div>
-                  <select id="changeRequestActivities" multiple size="6" data-chip-target="changeRequestActivitiesChips"></select>
+                  <select id="changeRequestActivities" data-chip-target="changeRequestActivitiesChips"></select>
                 </div>
                 <div class="multi-picker hidden" id="changeRequestLabelsWrap">
                   <div id="changeRequestLabelsChips" class="multi-chip-list"></div>
-                  <select id="changeRequestLabels" multiple size="6" data-chip-target="changeRequestLabelsChips"></select>
+                  <select id="changeRequestLabels" data-chip-target="changeRequestLabelsChips"></select>
                 </div>
               </label>
               <div class="row">
@@ -146,6 +348,7 @@
     </section>
   </main>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

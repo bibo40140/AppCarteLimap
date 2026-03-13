@@ -1,0 +1,28 @@
+<?php
+
+return [
+    'app_env' => 'production',
+    'db' => [
+        // Use the exact host displayed in OVH Manager for your database.
+        'host' => 'CHANGE_ME_OVH_DB_HOST',
+        'port' => '3306',
+        'name' => 'CHANGE_ME_OVH_DB_NAME',
+        'user' => 'CHANGE_ME_OVH_DB_USER',
+        'pass' => 'CHANGE_ME_OVH_DB_PASSWORD',
+        'charset' => 'utf8mb4',
+    ],
+    'admin' => [
+        'username' => 'admin',
+        'password_hash' => 'CHANGE_ME',
+    ],
+    'notifications' => [
+        'admin_emails' => '',
+        'from_email' => '',
+        'from_name' => 'AppCarte Limap',
+        'smtp_host' => '',
+        'smtp_port' => '',
+        'smtp_encryption' => 'tls',
+        'smtp_username' => '',
+        'smtp_password' => '',
+    ],
+];

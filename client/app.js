@@ -5,10 +5,18 @@ const state = {
   client: null,
   suppliers: [],
   changeRequests: [],
+  supplierCreateRequests: [],
+  supplierLinkRequests: [],
+  supplierLinkSearchResults: [],
   activities: [],
   labels: [],
   supplierTypes: [],
   selectedSupplierId: null,
+};
+
+const mapState = {
+  map: null,
+  marker: null,
 };
 
 const q = (id) => document.getElementById(id);
@@ -29,13 +37,70 @@ async function api(action, method = 'GET', body = null, query = {}) {
   return data;
 }
 
+async function apiForm(action, formData, query = {}) {
+  const params = new URLSearchParams({ action, ...query });
+  const resp = await fetch('../api/index.php?' + params.toString(), {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || ('HTTP ' + resp.status));
+  }
+  return data;
+}
+
 function showAuth(loggedIn) {
   q('loginView').classList.toggle('hidden', loggedIn);
   q('appView').classList.toggle('hidden', !loggedIn);
 }
 
+function showForgotView(show) {
+  q('forgotView')?.classList.toggle('hidden', !show);
+  if (!show) {
+    showMsg('forgotMsg', '');
+  }
+}
+
+function showResetView(show) {
+  q('resetView')?.classList.toggle('hidden', !show);
+  if (!show) {
+    showMsg('resetMsg', '');
+  }
+}
+
+function setClientTab(tabName) {
+  document.querySelectorAll('#clientTabs .tab-btn[data-tab]').forEach((btn) => {
+    btn.classList.toggle('active', safe(btn.getAttribute('data-tab')) === tabName);
+  });
+  document.querySelectorAll('.client-tab-panel[id^="panel-"]').forEach((panel) => {
+    const isActive = safe(panel.id) === `panel-${tabName}`;
+    panel.classList.toggle('active', isActive);
+  });
+  if (tabName === 'my-data') {
+    window.setTimeout(() => {
+      mapState.map?.invalidateSize();
+    }, 0);
+  }
+}
+
+function bindClientTabs() {
+  document.querySelectorAll('#clientTabs .tab-btn[data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tabName = safe(btn.getAttribute('data-tab'));
+      if (!tabName) return;
+      setClientTab(tabName);
+    });
+  });
+}
+
 function safe(v) {
   return String(v || '').trim();
+}
+
+function normalizeToken(value) {
+  return safe(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function parseList(value) {
@@ -55,7 +120,20 @@ function escapeHtml(value) {
 }
 
 function selectedValues(selectEl) {
-  return Array.from(selectEl?.selectedOptions || [])
+  if (!selectEl) return [];
+
+  const fromData = parseList(selectEl.dataset.values || '');
+  if (fromData.length) {
+    const seen = new Set();
+    return fromData.filter((value) => {
+      const key = normalizeToken(value);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  return Array.from(selectEl.selectedOptions || [])
     .map((opt) => safe(opt.value))
     .filter(Boolean);
 }
@@ -75,11 +153,17 @@ function ensureOption(selectEl, value) {
 }
 
 function setMultiSelectValues(selectEl, values) {
-  const list = Array.isArray(values) ? values.map((v) => safe(v)).filter(Boolean) : [];
-  list.forEach((value) => ensureOption(selectEl, value));
-  Array.from(selectEl.options).forEach((opt) => {
-    opt.selected = list.includes(safe(opt.value));
+  const listRaw = Array.isArray(values) ? values.map((v) => safe(v)).filter(Boolean) : [];
+  const seen = new Set();
+  const list = listRaw.filter((value) => {
+    const key = normalizeToken(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+
+  list.forEach((value) => ensureOption(selectEl, value));
+  selectEl.dataset.values = list.join('; ');
   refreshMultiPickerChips(selectEl);
 }
 
@@ -95,29 +179,46 @@ function refreshMultiPickerChips(selectEl) {
     return;
   }
 
-  host.innerHTML = values.map((value) => [
-    '<span class="multi-chip">',
-    escapeHtml(value),
-    '<button type="button" class="multi-chip-remove" data-chip-select="' + escapeHtml(selectEl.id) + '" data-chip-value="' + escapeHtml(value) + '">x</button>',
-    '</span>',
-  ].join('')).join('');
+  const lockedNorm = parseList(selectEl.dataset.lockedValues || '').map(normalizeToken);
+  host.innerHTML = values.map((value) => {
+    if (lockedNorm.includes(normalizeToken(value))) {
+      return '<span class="multi-chip multi-chip-locked" title="Ajouté par un autre client">' + escapeHtml(value) + '</span>';
+    }
+    return [
+      '<span class="multi-chip">',
+      escapeHtml(value),
+      '<span class="multi-chip-remove" data-chip-remove="1" data-chip-select="' + escapeHtml(selectEl.id) + '" data-chip-value="' + escapeHtml(value) + '" title="Retirer">x</span>',
+      '</span>',
+    ].join('');
+  }).join('');
 }
 
 function bindMultiPicker(selectId) {
   const selectEl = q(selectId);
   if (!selectEl) return;
-  selectEl.addEventListener('change', () => refreshMultiPickerChips(selectEl));
+  selectEl.addEventListener('change', () => {
+    const value = safe(selectEl.value);
+    if (!value) return;
+
+    const existing = selectedValues(selectEl);
+    if (!existing.some((item) => normalizeToken(item) === normalizeToken(value))) {
+      existing.push(value);
+    }
+    selectEl.dataset.values = existing.join('; ');
+    refreshMultiPickerChips(selectEl);
+    selectEl.value = '';
+  });
+
   const chipTargetId = selectEl.getAttribute('data-chip-target');
   const chipHost = chipTargetId ? q(chipTargetId) : null;
   chipHost?.addEventListener('click', (event) => {
-    const btn = event.target.closest('button[data-chip-select][data-chip-value]');
+    const btn = event.target.closest('[data-chip-remove="1"][data-chip-select][data-chip-value]');
     if (!btn) return;
     const value = safe(btn.getAttribute('data-chip-value'));
-    Array.from(selectEl.options).forEach((opt) => {
-      if (safe(opt.value) === value) {
-        opt.selected = false;
-      }
-    });
+    const lockedNorm = parseList(selectEl.dataset.lockedValues || '').map(normalizeToken);
+    if (lockedNorm.includes(normalizeToken(value))) return; // protected — another client added this
+    const filtered = selectedValues(selectEl).filter((item) => normalizeToken(item) !== normalizeToken(value));
+    selectEl.dataset.values = filtered.join('; ');
     refreshMultiPickerChips(selectEl);
   });
 }
@@ -144,6 +245,14 @@ function fieldLabel(field) {
     phone: 'Téléphone',
     email: 'Email',
     website: 'Site web',
+    facebook_url: 'Facebook',
+    instagram_url: 'Instagram',
+    linkedin_url: 'LinkedIn',
+    logo_url: 'Logo (URL)',
+    photo_cover_url: 'Image de couverture (URL)',
+    slug: 'Slug public',
+    description_short: 'Description courte',
+    description_long: 'Description longue',
     supplier_type: 'Type fournisseur',
     activity_text: 'Activités globales',
     labels: 'Labels globaux',
@@ -151,20 +260,199 @@ function fieldLabel(field) {
   return labels[safe(field)] || safe(field);
 }
 
+function resolveContextClientId() {
+  const fromState = Number(state.client?.id || 0);
+  if (fromState > 0) return fromState;
+
+  const fromMe = Number(state.me?.client_id || 0);
+  if (fromMe > 0) return fromMe;
+
+  const fromQuery = Number(new URLSearchParams(window.location.search).get('client_id') || 0);
+  if (fromQuery > 0) return fromQuery;
+
+  return 0;
+}
+
+function buildClientScopeQuery() {
+  const query = {};
+  const clientId = resolveContextClientId();
+  if (clientId > 0) {
+    query.client_id = String(clientId);
+  }
+  return query;
+}
+
+function formatNowTime() {
+  return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function currentSupplier() {
   return state.suppliers.find((row) => Number(row.id) === Number(state.selectedSupplierId)) || null;
 }
 
 function renderReferenceSelects() {
-  populateSelect(q('profileActivitySelect'), state.activities);
-  populateSelect(q('profileLabelsSelect'), state.labels);
+  populateSelect(q('profileActivitySelect'), state.activities, { includeEmpty: true, emptyLabel: 'Ajouter une activité...' });
+  populateSelect(q('profileLabelsSelect'), state.labels, { includeEmpty: true, emptyLabel: 'Ajouter un label...' });
   populateSelect(q('changeRequestSupplierType'), state.supplierTypes, { includeEmpty: true, emptyLabel: 'Sélectionner un type' });
-  populateSelect(q('changeRequestActivities'), state.activities);
-  populateSelect(q('changeRequestLabels'), state.labels);
+  populateSelect(q('changeRequestActivities'), state.activities, { includeEmpty: true, emptyLabel: 'Ajouter une activité...' });
+  populateSelect(q('changeRequestLabels'), state.labels, { includeEmpty: true, emptyLabel: 'Ajouter un label...' });
+  populateSelect(q('newSupplierType'), state.supplierTypes, { includeEmpty: true, emptyLabel: 'Sélectionner un type' });
+  populateSelect(q('newSupplierActivities'), state.activities, { includeEmpty: true, emptyLabel: 'Ajouter une activité...' });
+  populateSelect(q('newSupplierLabels'), state.labels, { includeEmpty: true, emptyLabel: 'Ajouter un label...' });
   refreshMultiPickerChips(q('profileActivitySelect'));
   refreshMultiPickerChips(q('profileLabelsSelect'));
   refreshMultiPickerChips(q('changeRequestActivities'));
   refreshMultiPickerChips(q('changeRequestLabels'));
+  refreshMultiPickerChips(q('newSupplierActivities'));
+  refreshMultiPickerChips(q('newSupplierLabels'));
+}
+
+function renderClientInfoForm() {
+  const c = state.client || {};
+  q('clientInfoName').value = safe(c.name);
+  q('clientInfoType').value = safe(c.client_type);
+  q('clientInfoEmail').value = safe(c.email);
+  q('clientInfoPhone').value = safe(c.phone);
+  q('clientInfoWebsite').value = safe(c.website);
+  q('clientInfoFacebook').value = safe(c.facebook_url);
+  q('clientInfoInstagram').value = safe(c.instagram_url);
+  q('clientInfoLogoPath').value = safe(c.logo_url) ? 'Logo actuel' : '';
+  q('clientInfoAddress').value = safe(c.address);
+  q('clientInfoCity').value = safe(c.city);
+  q('clientInfoPostal').value = safe(c.postal_code);
+  q('clientInfoCountry').value = safe(c.country) || 'France';
+  q('clientInfoLat').value = safe(c.latitude);
+  q('clientInfoLng').value = safe(c.longitude);
+  q('clientInfoDescriptionShort').value = safe(c.description_short);
+  q('clientInfoDescriptionLong').value = safe(c.description_long);
+  syncLongTextEditorFromTextarea();
+
+  initOrUpdateClientMap();
+}
+
+function syncLongTextEditorFromTextarea() {
+  const source = q('clientInfoDescriptionLong');
+  const editor = q('clientInfoDescriptionLongEditor');
+  if (!source || !editor) return;
+
+  const html = String(source.value || '').trim();
+  editor.innerHTML = html || '<p></p>';
+}
+
+function syncLongTextTextareaFromEditor() {
+  const source = q('clientInfoDescriptionLong');
+  const editor = q('clientInfoDescriptionLongEditor');
+  if (!source || !editor) return;
+  source.value = String(editor.innerHTML || '').trim();
+}
+
+function initOrUpdateClientMap() {
+  const latVal = Number(String(q('clientInfoLat').value || '').replace(',', '.'));
+  const lngVal = Number(String(q('clientInfoLng').value || '').replace(',', '.'));
+  const hasCoords = Number.isFinite(latVal) && Number.isFinite(lngVal);
+  const center = hasCoords ? [latVal, lngVal] : [43.7102, -1.0553];
+  const zoom = hasCoords ? 13 : 8;
+
+  if (!mapState.map) {
+    mapState.map = L.map('clientInfoMap');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(mapState.map);
+  }
+
+  mapState.map.setView(center, zoom);
+  mapState.map.invalidateSize();
+
+  if (mapState.marker) {
+    mapState.marker.remove();
+  }
+
+  mapState.marker = L.marker(center, { draggable: true }).addTo(mapState.map);
+  mapState.marker.on('dragend', () => {
+    const pos = mapState.marker.getLatLng();
+    q('clientInfoLat').value = Number(pos.lat).toFixed(6);
+    q('clientInfoLng').value = Number(pos.lng).toFixed(6);
+  });
+}
+
+function renderSupplierCreateRequests() {
+  const host = q('supplierCreateRequestsList');
+  const rows = state.supplierCreateRequests || [];
+  if (!rows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucune demande de création.</div></div>';
+    return;
+  }
+
+  host.innerHTML = rows.map((r) => {
+    const status = safe(r.status) || 'pending';
+    const approvedName = safe(r.approved_supplier_name);
+    const review = safe(r.review_note);
+    const details = [safe(r.supplier_type), safe(r.city), safe(r.activity_text)].filter(Boolean).join(' | ');
+    return [
+      '<div class="list-item">',
+      '<div class="list-main">' + escapeHtml(safe(r.name) || '(sans nom)') + ' - ' + escapeHtml(statusLabel(status)) + '</div>',
+      '<div class="list-sub">' + (details ? escapeHtml(details) : 'Sans détails') + '</div>',
+      (approvedName ? '<div class="list-sub">Fournisseur créé: ' + escapeHtml(approvedName) + '</div>' : ''),
+      (review ? '<div class="list-sub">Note admin: ' + escapeHtml(review) + '</div>' : ''),
+      '<div class="list-sub">Le ' + escapeHtml(safe(r.created_at)) + '</div>',
+      '</div>',
+    ].join('');
+  }).join('');
+}
+
+function renderSupplierLinkSearchResults() {
+  const host = q('linkSupplierSearchResults');
+  const rows = state.supplierLinkSearchResults || [];
+  if (!rows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucun resultat. Essayez avec un autre mot-cle.</div></div>';
+    return;
+  }
+
+  host.innerHTML = rows.map((r) => {
+    const details = [safe(r.city), safe(r.postal_code), safe(r.supplier_type)].filter(Boolean).join(' | ');
+    return [
+      '<div class="list-item">',
+      '<div class="list-main">' + escapeHtml(safe(r.name) || '(sans nom)') + '</div>',
+      '<div class="list-sub">' + escapeHtml(details || 'Sans details') + '</div>',
+      '<div class="row" style="margin-top:6px;">',
+      '<button type="button" data-link-supplier-id="' + Number(r.id) + '">Demander le rattachement</button>',
+      '</div>',
+      '</div>',
+    ].join('');
+  }).join('');
+
+  host.querySelectorAll('button[data-link-supplier-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const supplierId = Number(btn.getAttribute('data-link-supplier-id') || 0);
+      if (supplierId > 0) {
+        await onCreateSupplierLinkRequest(supplierId);
+      }
+    });
+  });
+}
+
+function renderSupplierLinkRequests() {
+  const host = q('supplierLinkRequestsList');
+  const rows = state.supplierLinkRequests || [];
+  if (!rows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucune demande de rattachement.</div></div>';
+    return;
+  }
+
+  host.innerHTML = rows.map((r) => {
+    const status = safe(r.status) || 'pending';
+    const details = [safe(r.supplier_name), safe(r.supplier_city)].filter(Boolean).join(' | ');
+    const note = safe(r.note);
+    const review = safe(r.review_note);
+    return [
+      '<div class="list-item">',
+      '<div class="list-main">' + escapeHtml(details || '(fournisseur)') + ' - ' + escapeHtml(statusLabel(status)) + '</div>',
+      (note ? '<div class="list-sub">Note: ' + escapeHtml(note) + '</div>' : ''),
+      (review ? '<div class="list-sub">Note admin: ' + escapeHtml(review) + '</div>' : ''),
+      '<div class="list-sub">Le ' + escapeHtml(safe(r.created_at)) + '</div>',
+      '</div>',
+    ].join('');
+  }).join('');
 }
 
 function renderChangeRequestInput() {
@@ -213,6 +501,14 @@ function renderChangeRequestInput() {
     phone: supplier.phone,
     email: supplier.email,
     website: supplier.website,
+    facebook_url: supplier.facebook_url,
+    instagram_url: supplier.instagram_url,
+    linkedin_url: supplier.linkedin_url,
+    logo_url: supplier.logo_url,
+    photo_cover_url: supplier.photo_cover_url,
+    slug: supplier.slug,
+    description_short: supplier.description_short,
+    description_long: supplier.description_long,
   };
   textEl.value = safe(valueMap[field]);
 }
@@ -228,6 +524,12 @@ function renderClientHeader() {
   q('clientTitleText').textContent = safe(client.name) || 'Mon espace client';
   const meta = [safe(client.city), safe(client.client_type)].filter(Boolean).join(' - ');
   q('clientMeta').textContent = meta || 'Gestion des profils fournisseurs';
+
+  const logoHost = q('clientHeaderLogo');
+  const logoUrl = safe(client.logo_url);
+  logoHost.innerHTML = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="logo client" />`
+    : '<span class="muted">Logo</span>';
 
   const pendingCount = state.changeRequests.filter((r) => safe(r.status) === 'pending').length;
   const pendingBadge = q('pendingBadge');
@@ -253,12 +555,16 @@ function formatGlobalSupplier(s) {
   const acts = safe(s.global_activity_text) || '-';
   const type = safe(s.supplier_type) || '-';
   const contact = [safe(s.phone), safe(s.email)].filter(Boolean).join(' / ') || '-';
+  const logo = safe(s.logo_url);
+  const shortDescription = safe(s.description_short) || '-';
 
   return [
     '<strong>Fiche globale</strong>',
+    (logo ? '<div style="margin:6px 0;"><img src="' + logo + '" alt="logo producteur" style="max-height:46px;max-width:160px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px;padding:2px;background:#fff;"></div>' : ''),
     '<div><b>Type:</b> ' + type + '</div>',
     '<div><b>Activites:</b> ' + acts + '</div>',
     '<div><b>Labels:</b> ' + labels + '</div>',
+    '<div><b>Description courte:</b> ' + shortDescription + '</div>',
     '<div><b>Contact:</b> ' + contact + '</div>',
   ].join('');
 }
@@ -325,8 +631,26 @@ function renderEditor() {
   global.classList.remove('hidden');
 
   q('profileSupplierId').value = String(Number(s.id));
-  setMultiSelectValues(q('profileActivitySelect'), parseList(s.profile_activity_text));
-  setMultiSelectValues(q('profileLabelsSelect'), parseList(s.profile_labels_text));
+
+  // Locked = everything NOT added by this client in their own profile.
+  // Admin-imported data and other clients' items are locked; only own items have x.
+  const globalActivities = parseList(s.global_activity_text || '');
+  const ownActivities    = parseList(s.profile_activity_text || '');
+  const lockedActivities = globalActivities.filter(
+    (a) => !ownActivities.some((o) => normalizeToken(o) === normalizeToken(a))
+  );
+  const actSel = q('profileActivitySelect');
+  actSel.dataset.lockedValues = lockedActivities.join('; ');
+  setMultiSelectValues(actSel, globalActivities);
+
+  const globalLabels = parseList(s.global_labels || '');
+  const ownLabels    = parseList(s.profile_labels_text || '');
+  const lockedLabels = globalLabels.filter(
+    (l) => !ownLabels.some((o) => normalizeToken(o) === normalizeToken(l))
+  );
+  const labSel = q('profileLabelsSelect');
+  labSel.dataset.lockedValues = lockedLabels.join('; ');
+  setMultiSelectValues(labSel, globalLabels);
   q('profileNotes').value = safe(s.profile_notes);
   q('profileRelationshipStatus').value = safe(s.relationship_status) || 'active';
   form.classList.remove('hidden');
@@ -380,29 +704,30 @@ function renderChangeRequestsForSelectedSupplier() {
 }
 
 async function loadChangeRequests() {
-  const query = {};
+  const query = buildClientScopeQuery();
   const statusFilter = safe(q('changeRequestStatusFilter')?.value || 'all');
   if (statusFilter !== 'all') {
     query.status = statusFilter;
-  }
-
-  if (state.me?.is_admin) {
-    const adminClientId = Number(new URLSearchParams(window.location.search).get('client_id') || 0);
-    if (adminClientId > 0) {
-      query.client_id = String(adminClientId);
-    }
   }
 
   const res = await api('client/change-request/list', 'GET', null, query);
   state.changeRequests = Array.isArray(res.requests) ? res.requests : [];
 }
 
+async function loadSupplierCreateRequests() {
+  const query = buildClientScopeQuery();
+  const res = await api('client/supplier-create-request/list', 'GET', null, query);
+  state.supplierCreateRequests = Array.isArray(res.requests) ? res.requests : [];
+}
+
+async function loadSupplierLinkRequests() {
+  const query = buildClientScopeQuery();
+  const res = await api('client/supplier-link-request/list', 'GET', null, query);
+  state.supplierLinkRequests = Array.isArray(res.requests) ? res.requests : [];
+}
+
 async function loadBootstrap() {
-  const query = {};
-  if (state.me?.is_admin) {
-    const maybeId = Number(new URLSearchParams(window.location.search).get('client_id') || 0);
-    if (maybeId > 0) query.client_id = String(maybeId);
-  }
+  const query = buildClientScopeQuery();
 
   const res = await api('client/bootstrap', 'GET', null, query);
   state.client = res.client || null;
@@ -417,6 +742,7 @@ async function loadBootstrap() {
   }
 
   renderClientHeader();
+  renderClientInfoForm();
   renderSupplierList();
   renderEditor();
 
@@ -427,6 +753,60 @@ async function loadBootstrap() {
   }
   renderClientHeader();
   renderChangeRequestsForSelectedSupplier();
+
+  try {
+    await loadSupplierCreateRequests();
+  } catch (e) {
+    console.error('loadSupplierCreateRequests error:', e);
+  }
+  renderSupplierCreateRequests();
+
+  try {
+    await loadSupplierLinkRequests();
+  } catch (e) {
+    console.error('loadSupplierLinkRequests error:', e);
+  }
+  renderSupplierLinkRequests();
+}
+
+async function onSearchSupplierLinkCandidates() {
+  showMsg('linkSupplierMsg', '');
+  try {
+    const qText = safe(q('linkSupplierSearch').value);
+    if (qText.length < 2) {
+      throw new Error('Saisissez au moins 2 caracteres');
+    }
+    const query = buildClientScopeQuery();
+    query.q = qText;
+    const res = await api('client/supplier-link-search', 'GET', null, query);
+    state.supplierLinkSearchResults = Array.isArray(res.suppliers) ? res.suppliers : [];
+    renderSupplierLinkSearchResults();
+    showMsg('linkSupplierMsg', `${state.supplierLinkSearchResults.length} resultat(s)`);
+  } catch (e) {
+    showMsg('linkSupplierMsg', e.message, true);
+  }
+}
+
+async function onCreateSupplierLinkRequest(supplierId) {
+  showMsg('linkSupplierMsg', '');
+  try {
+    const payload = {
+      client_id: resolveContextClientId(),
+      supplier_id: Number(supplierId || 0),
+      note: safe(q('linkSupplierNote').value),
+    };
+    if (!payload.supplier_id) {
+      throw new Error('Fournisseur invalide');
+    }
+
+    await api('client/supplier-link-request/save', 'POST', payload);
+    showMsg('linkSupplierMsg', `Demande de rattachement envoyee a ${formatNowTime()}`);
+    q('linkSupplierNote').value = '';
+    await loadSupplierLinkRequests();
+    renderSupplierLinkRequests();
+  } catch (e) {
+    showMsg('linkSupplierMsg', e.message, true);
+  }
 }
 
 async function onLogin() {
@@ -443,9 +823,52 @@ async function onLogin() {
     state.me = me;
 
     showAuth(true);
+    setClientTab('my-data');
     await loadBootstrap();
   } catch (e) {
     showMsg('loginMsg', e.message, true);
+  }
+}
+
+async function onForgotPassword() {
+  showMsg('forgotMsg', '');
+  try {
+    const email = safe(q('forgotEmail').value);
+    if (!email) {
+      throw new Error('Email requis');
+    }
+    await api('auth/password-reset/request', 'POST', { email });
+    showMsg('forgotMsg', 'Si le compte existe, un email de réinitialisation vient d\'être envoyé.');
+  } catch (e) {
+    showMsg('forgotMsg', e.message, true);
+  }
+}
+
+async function onResetPassword() {
+  showMsg('resetMsg', '');
+  try {
+    const token = safe(new URLSearchParams(window.location.search).get('reset_token'));
+    if (!token) {
+      throw new Error('Token manquant');
+    }
+    const p1 = q('resetPassword').value || '';
+    const p2 = q('resetPasswordConfirm').value || '';
+    if (!p1) {
+      throw new Error('Nouveau mot de passe requis');
+    }
+    if (p1 !== p2) {
+      throw new Error('Les mots de passe ne correspondent pas');
+    }
+    await api('auth/password-reset/confirm', 'POST', { token, new_password: p1 });
+    showMsg('resetMsg', 'Mot de passe mis à jour. Vous pouvez maintenant vous connecter.');
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('reset_token');
+    window.history.replaceState({}, '', url.toString());
+    showResetView(false);
+    showForgotView(false);
+  } catch (e) {
+    showMsg('resetMsg', e.message, true);
   }
 }
 
@@ -454,8 +877,113 @@ async function onLogout() {
   state.me = null;
   state.client = null;
   state.suppliers = [];
+  state.supplierCreateRequests = [];
   state.selectedSupplierId = null;
   showAuth(false);
+}
+
+async function onSaveClientInfo() {
+  showMsg('clientInfoMsg', '');
+  try {
+    syncLongTextTextareaFromEditor();
+
+    let logoUrl = safe(state.client?.logo_url);
+    const logoFile = q('clientInfoLogoFile').files?.[0];
+    if (logoFile) {
+      const form = new FormData();
+      form.append('logo', logoFile);
+      const up = await apiForm('client/upload/client-logo', form, buildClientScopeQuery());
+      logoUrl = safe(up.url);
+    }
+
+    const payload = {
+      client_id: resolveContextClientId(),
+      name: safe(q('clientInfoName').value),
+      client_type: safe(q('clientInfoType').value),
+      email: safe(q('clientInfoEmail').value),
+      phone: safe(q('clientInfoPhone').value),
+      website: safe(q('clientInfoWebsite').value),
+      facebook_url: safe(q('clientInfoFacebook').value),
+      instagram_url: safe(q('clientInfoInstagram').value),
+      logo_url: logoUrl,
+      address: safe(q('clientInfoAddress').value),
+      city: safe(q('clientInfoCity').value),
+      postal_code: safe(q('clientInfoPostal').value),
+      country: safe(q('clientInfoCountry').value),
+      latitude: safe(q('clientInfoLat').value),
+      longitude: safe(q('clientInfoLng').value),
+      description_short: safe(q('clientInfoDescriptionShort').value),
+      description_long: safe(q('clientInfoDescriptionLong').value),
+    };
+
+    await api('client/profile/save', 'POST', payload);
+    q('clientInfoLogoFile').value = '';
+    await loadBootstrap();
+    showMsg('clientInfoMsg', `Fiche client mise à jour à ${formatNowTime()}`);
+  } catch (e) {
+    showMsg('clientInfoMsg', e.message, true);
+  }
+}
+
+async function onClientGeocode() {
+  showMsg('clientInfoMsg', '');
+  try {
+    const address = [
+      safe(q('clientInfoAddress').value),
+      safe(q('clientInfoPostal').value),
+      safe(q('clientInfoCity').value),
+      safe(q('clientInfoCountry').value),
+    ].filter(Boolean).join(', ');
+
+    if (!address) {
+      throw new Error('Adresse client incomplète');
+    }
+
+    const geo = await api('client/geocode', 'POST', { address }, buildClientScopeQuery());
+    if (!geo.found) {
+      throw new Error('Adresse introuvable');
+    }
+
+    q('clientInfoLat').value = Number(geo.lat).toFixed(6);
+    q('clientInfoLng').value = Number(geo.lng).toFixed(6);
+    initOrUpdateClientMap();
+    showMsg('clientInfoMsg', 'Position trouvée. Vous pouvez déplacer le repère manuellement sur la carte.');
+  } catch (e) {
+    showMsg('clientInfoMsg', e.message, true);
+  }
+}
+
+async function onCreateSupplierRequest() {
+  showMsg('supplierCreateMsg', '');
+  try {
+    const payload = {
+      client_id: resolveContextClientId(),
+      name: safe(q('newSupplierName').value),
+      supplier_type: safe(q('newSupplierType').value),
+      activity_text: joinSelectedValues(q('newSupplierActivities')),
+      labels_text: joinSelectedValues(q('newSupplierLabels')),
+      address: safe(q('newSupplierAddress').value),
+      city: safe(q('newSupplierCity').value),
+      postal_code: safe(q('newSupplierPostal').value),
+      country: safe(q('newSupplierCountry').value),
+      phone: safe(q('newSupplierPhone').value),
+      email: safe(q('newSupplierEmail').value),
+      website: safe(q('newSupplierWebsite').value),
+      notes: safe(q('newSupplierNotes').value),
+    };
+
+    await api('client/supplier-create-request/save', 'POST', payload);
+
+    q('supplierCreateRequestForm').reset();
+    q('newSupplierCountry').value = 'France';
+    setMultiSelectValues(q('newSupplierActivities'), []);
+    setMultiSelectValues(q('newSupplierLabels'), []);
+
+    await loadBootstrap();
+    showMsg('supplierCreateMsg', `Demande de création envoyée à ${formatNowTime()}`);
+  } catch (e) {
+    showMsg('supplierCreateMsg', e.message, true);
+  }
 }
 
 async function onSaveProfile() {
@@ -463,14 +991,28 @@ async function onSaveProfile() {
   try {
     const supplierId = Number(q('profileSupplierId').value || 0);
     if (!supplierId) throw new Error('Aucun fournisseur selectionne');
+    const clientId = resolveContextClientId();
+
+    // Send only the items this client owns (exclude locked chips from other clients)
+    const actSel = q('profileActivitySelect');
+    const lockedActNorm = parseList(actSel.dataset.lockedValues || '').map(normalizeToken);
+    const ownActivities = selectedValues(actSel).filter((v) => !lockedActNorm.includes(normalizeToken(v)));
+
+    const labSel = q('profileLabelsSelect');
+    const lockedLabNorm = parseList(labSel.dataset.lockedValues || '').map(normalizeToken);
+    const ownLabels = selectedValues(labSel).filter((v) => !lockedLabNorm.includes(normalizeToken(v)));
 
     const payload = {
       supplier_id: supplierId,
-      activity_text: joinSelectedValues(q('profileActivitySelect')),
-      labels_text: joinSelectedValues(q('profileLabelsSelect')),
+      activity_text: ownActivities.join('; '),
+      labels_text: ownLabels.join('; '),
       notes: safe(q('profileNotes').value),
       relationship_status: safe(q('profileRelationshipStatus').value) || 'active',
     };
+
+    if (clientId > 0) {
+      payload.client_id = clientId;
+    }
 
     if (state.me?.is_admin) {
       const adminClientId = Number(new URLSearchParams(window.location.search).get('client_id') || 0);
@@ -478,8 +1020,8 @@ async function onSaveProfile() {
     }
 
     await api('client/supplier/profile/save', 'POST', payload);
-    showMsg('profileMsg', 'Profil enregistre');
     await loadBootstrap();
+    showMsg('profileMsg', `Profil enregistre a ${formatNowTime()}`);
   } catch (e) {
     showMsg('profileMsg', e.message, true);
   }
@@ -490,12 +1032,17 @@ async function onSaveChangeRequest() {
   try {
     const supplierId = Number(q('profileSupplierId').value || 0);
     if (!supplierId) throw new Error('Aucun fournisseur selectionne');
+    const clientId = resolveContextClientId();
 
     const payload = {
       supplier_id: supplierId,
       field_name: safe(q('changeRequestField').value),
       new_value: '',
     };
+
+    if (clientId > 0) {
+      payload.client_id = clientId;
+    }
 
     if (payload.field_name === 'supplier_type') {
       payload.new_value = safe(q('changeRequestSupplierType').value);
@@ -521,16 +1068,30 @@ async function onSaveChangeRequest() {
     q('changeRequestSupplierType').value = '';
     setMultiSelectValues(q('changeRequestActivities'), []);
     setMultiSelectValues(q('changeRequestLabels'), []);
-    showMsg('changeRequestMsg', 'Demande envoyee');
     await loadBootstrap();
+    showMsg('changeRequestMsg', `Demande envoyee a ${formatNowTime()}`);
   } catch (e) {
     showMsg('changeRequestMsg', e.message, true);
   }
 }
 
 function bindEvents() {
+  bindClientTabs();
   q('btnLogin').addEventListener('click', onLogin);
+  q('btnShowForgot').addEventListener('click', () => {
+    const isHidden = q('forgotView').classList.contains('hidden');
+    showForgotView(isHidden);
+  });
+  q('btnForgotSubmit').addEventListener('click', onForgotPassword);
+  q('btnResetSubmit').addEventListener('click', onResetPassword);
   q('btnLogout').addEventListener('click', onLogout);
+  q('btnClientGeocode').addEventListener('click', onClientGeocode);
+  q('btnSaveClientInfo').addEventListener('click', onSaveClientInfo);
+  q('btnCreateSupplierRequest').addEventListener('click', onCreateSupplierRequest);
+  q('btnSearchLinkSupplier').addEventListener('click', onSearchSupplierLinkCandidates);
+  q('btnGoNewSupplier').addEventListener('click', () => {
+    setClientTab('new-supplier');
+  });
   q('btnSaveProfile').addEventListener('click', onSaveProfile);
   q('btnSaveChangeRequest').addEventListener('click', onSaveChangeRequest);
   q('searchSupplier').addEventListener('input', renderSupplierList);
@@ -539,6 +1100,37 @@ function bindEvents() {
   bindMultiPicker('profileLabelsSelect');
   bindMultiPicker('changeRequestActivities');
   bindMultiPicker('changeRequestLabels');
+  bindMultiPicker('newSupplierActivities');
+  bindMultiPicker('newSupplierLabels');
+
+  q('clientInfoLogoFile').addEventListener('change', () => {
+    const f = q('clientInfoLogoFile').files?.[0];
+    if (!f) return;
+    q('clientInfoLogoPath').value = f.name;
+    const blobUrl = URL.createObjectURL(f);
+    q('clientHeaderLogo').innerHTML = `<img src="${blobUrl}" alt="aperçu logo client" />`;
+  });
+
+  ['clientInfoLat', 'clientInfoLng'].forEach((id) => {
+    q(id).addEventListener('change', () => {
+      initOrUpdateClientMap();
+    });
+  });
+
+  q('clientInfoDescriptionLongEditor').addEventListener('input', () => {
+    syncLongTextTextareaFromEditor();
+  });
+
+  q('clientInfoLongEditorToolbar').addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-editor-cmd]');
+    if (!btn) return;
+    const cmd = safe(btn.getAttribute('data-editor-cmd'));
+    const arg = btn.getAttribute('data-editor-arg');
+    q('clientInfoDescriptionLongEditor').focus();
+    document.execCommand(cmd, false, arg || null);
+    syncLongTextTextareaFromEditor();
+  });
+
   q('changeRequestStatusFilter').addEventListener('change', async () => {
     await loadChangeRequests();
     renderChangeRequestsForSelectedSupplier();
@@ -546,10 +1138,26 @@ function bindEvents() {
   q('loginPass').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') onLogin();
   });
+  q('forgotEmail').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') onForgotPassword();
+  });
+  q('resetPasswordConfirm').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') onResetPassword();
+  });
+  q('linkSupplierSearch').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') onSearchSupplierLinkCandidates();
+  });
 }
 
 async function init() {
   bindEvents();
+
+  const resetToken = safe(new URLSearchParams(window.location.search).get('reset_token'));
+  if (resetToken) {
+    showAuth(false);
+    showResetView(true);
+    showForgotView(false);
+  }
 
   try {
     const me = await api('auth/me');
@@ -560,6 +1168,7 @@ async function init() {
       }
       state.me = me;
       showAuth(true);
+      setClientTab('my-data');
       try {
         await loadBootstrap();
       } catch (bootErr) {
@@ -572,6 +1181,9 @@ async function init() {
   }
 
   showAuth(false);
+  if (!resetToken) {
+    showResetView(false);
+  }
 }
 
 init();

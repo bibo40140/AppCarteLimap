@@ -1126,7 +1126,7 @@ allClients.forEach(e => {
 
     // === 12) Chargement des données (BDD uniquement) ===
 function loadData() {
-fetch('/api/index.php?action=map-data&v=' + Date.now())
+fetch('api/index.php?action=map-data&v=' + Date.now())
     .then(resp => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();

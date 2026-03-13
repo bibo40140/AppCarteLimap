@@ -1,0 +1,17 @@
+# Runtime / local backups
+backups/*.sql
+
+# Server-only config override
+api/config.local.php
+
+# Temporary probe folders
+_tmp_probe/
+_tmp_probe3/
+_tmp_seed2/
+
+# Local office files
+*.xls
+*.xlsx
+
+# Optional local generated zips
+*.zip

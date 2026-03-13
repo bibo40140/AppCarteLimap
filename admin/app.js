@@ -2,7 +2,11 @@ const apiBase = '../api/index.php?action=';
 let state = {
   clients: [],
   client_users: [],
+  admin_users: [],
+  password_reset_audit: [],
   change_requests: [],
+  supplier_create_requests: [],
+  supplier_link_requests: [],
   activities: [],
   labels: [],
   supplier_types: [],
@@ -23,6 +27,11 @@ const q = (id) => document.getElementById(id);
 const mapEditorState = { map: null, marker: null, rowIndex: null };
 let importLoaderTimer = null;
 let geocodeProgressAbort = false;
+let geocodeLastCallAt = 0;
+
+function waitMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function api(action, method = 'GET', body = null) {
   const opts = { method, credentials: 'include', headers: {} };
@@ -89,6 +98,16 @@ function setImportLoading(active, steps = []) {
 
 async function geocodeAddress(addressText) {
   if (!addressText.trim()) return null;
+
+  // Nominatim public endpoint enforces strict rate limits.
+  // Keep at most ~1 request/second from this client.
+  const minIntervalMs = 1100;
+  const elapsed = Date.now() - geocodeLastCallAt;
+  if (elapsed < minIntervalMs) {
+    await waitMs(minIntervalMs - elapsed);
+  }
+
+  geocodeLastCallAt = Date.now();
   const res = await api('admin/geocode', 'POST', { address: addressText });
   if (!res.found) return null;
   return { lat: res.lat, lng: res.lng, display: res.display_name || '' };
@@ -117,6 +136,8 @@ async function geocodePreviewRowsProgressively() {
   }
 
   let done = 0;
+  let foundCount = 0;
+  let missingCount = 0;
   for (const tr of toGeocode) {
     if (geocodeProgressAbort) break;
 
@@ -157,6 +178,7 @@ async function geocodePreviewRowsProgressively() {
     if (geo) {
       latInput.value = String(geo.lat);
       lngInput.value = String(geo.lng);
+      foundCount++;
       // Update geocode note in the address cell
       const addrCell = sel('address')?.closest('td');
       const noteEl = addrCell?.querySelector('.muted');
@@ -171,6 +193,8 @@ async function geocodePreviewRowsProgressively() {
         note.textContent = 'Position approximative sur le village — ajuste le pin si besoin.';
         addrCell.appendChild(note);
       }
+    } else {
+      missingCount++;
     }
 
     done++;
@@ -181,7 +205,7 @@ async function geocodePreviewRowsProgressively() {
     refreshImportCommitState();
 
     // Yield to the event loop so the UI stays responsive between geocode requests
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await waitMs(0);
   }
 
   const geocoded = toGeocode.filter((_, i) => i < done).length;
@@ -189,7 +213,7 @@ async function geocodePreviewRowsProgressively() {
     if (geocodeProgressAbort) {
       progressEl.textContent = '';
     } else {
-      progressEl.innerHTML = `<span class="muted">Géocodage terminé : ${geocoded} lignes traitées.</span>`;
+      progressEl.innerHTML = `<span class="muted">Géocodage terminé : ${geocoded} lignes traitées, ${foundCount} coordonnées trouvées, ${missingCount} non trouvées.</span>`;
     }
   }
   updateImportGridStatuses();
@@ -274,22 +298,75 @@ function renderTable(hostId, columns, rows, editCbName) {
 
 function renderSuppliers() {
   const host = q('suppliersTable');
-  if (!state.suppliers.length) {
+  const textFilter = String(q('supplierFilterText')?.value || '').trim().toLocaleLowerCase('fr');
+  const clientIdFilter = Number(q('supplierFilterClient')?.value || 0);
+  const activityFilter = String(q('supplierFilterActivity')?.value || '').trim().toLocaleLowerCase('fr');
+  const typeFilter = String(q('supplierFilterType')?.value || '').trim().toLocaleLowerCase('fr');
+
+  const filteredSuppliers = (state.suppliers || []).filter((supplier) => {
+    const supplierType = String(supplier.supplier_type || '').trim().toLocaleLowerCase('fr');
+    const supplierActivities = splitDelimitedUnique(String(supplier.activity_text || ''))
+      .map((v) => v.toLocaleLowerCase('fr'));
+    const linkedClientIds = String(supplier.client_ids || '')
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter(Number.isFinite);
+
+    if (clientIdFilter > 0 && !linkedClientIds.includes(clientIdFilter)) {
+      return false;
+    }
+
+    if (activityFilter && !supplierActivities.includes(activityFilter)) {
+      return false;
+    }
+
+    if (typeFilter && supplierType !== typeFilter) {
+      return false;
+    }
+
+    if (textFilter) {
+      const haystack = [
+        supplier.name,
+        supplier.city,
+        supplier.email,
+        supplier.phone,
+        supplier.supplier_type,
+        supplier.activity_text,
+        supplier.clients,
+      ]
+        .map((value) => String(value || '').toLocaleLowerCase('fr'))
+        .join(' ');
+      if (!haystack.includes(textFilter)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const summary = q('supplierFilterSummary');
+  if (summary) {
+    summary.textContent = `${filteredSuppliers.length} fournisseur(s) affiché(s) / ${state.suppliers.length}`;
+  }
+
+  if (!filteredSuppliers.length) {
     host.innerHTML = '<div class="muted">Aucun fournisseur.</div>';
     return;
   }
-  const rows = state.suppliers.map(s => `
+  const rows = filteredSuppliers.map(s => `
     <tr>
       <td>${escapeHtml(s.name || '')}</td>
+      <td>${escapeHtml(s.supplier_type || '')}</td>
       <td>${escapeHtml(s.city || '')}</td>
       <td>${escapeHtml(s.phone || '')}</td>
       <td>${escapeHtml(s.email || '')}</td>
+      <td>${Number(s.is_public) === 1 ? 'Oui' : 'Non'}</td>
       <td>${(s.activity_text || '').split(';').map(v => v.trim()).filter(Boolean).map(v => `<span class="pill">${escapeHtml(v)}</span>`).join(' ')}</td>
       <td>${escapeHtml(s.clients || '')}</td>
       <td><div class="row"><button type="button" onclick="editSupplier(${s.id})">Modifier</button><button type="button" class="danger" onclick="deleteSupplier(${s.id})">Supprimer</button></div></td>
     </tr>
   `).join('');
-  host.innerHTML = `<table><thead><tr><th>Nom</th><th>Ville</th><th>Tél</th><th>Email</th><th>Activités</th><th>Clients</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<table><thead><tr><th>Nom</th><th>Type</th><th>Ville</th><th>Tél</th><th>Email</th><th>Public</th><th>Activités</th><th>Clients</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderClientUsers() {
@@ -302,10 +379,12 @@ function renderClientUsers() {
   const rows = state.client_users.map((u) => {
     const activeText = Number(u.is_active) === 1 ? 'Actif' : 'Inactif';
     const lastLogin = u.last_login_at ? escapeHtml(String(u.last_login_at)) : '—';
+    const hasEmail = String(u.email || '').trim() !== '';
     return `
       <tr>
         <td>${escapeHtml(u.client_name || '')}</td>
         <td>${escapeHtml(u.username || '')}</td>
+        <td>${escapeHtml(u.email || '')}</td>
         <td>${escapeHtml(u.role || '')}</td>
         <td>${activeText}</td>
         <td>${lastLogin}</td>
@@ -313,6 +392,7 @@ function renderClientUsers() {
           <div class="row">
             <button type="button" onclick="editClientUser(${u.id})">Modifier</button>
             <button type="button" onclick="toggleClientUserActive(${u.id}, ${Number(u.is_active) === 1 ? 0 : 1})">${Number(u.is_active) === 1 ? 'Désactiver' : 'Activer'}</button>
+            <button type="button" onclick="sendClientUserResetLink(${u.id})" ${hasEmail ? '' : 'disabled title="Email utilisateur manquant"'}>${hasEmail ? 'Envoyer lien reset' : 'Email manquant'}</button>
             <button type="button" onclick="resetClientUserPassword(${u.id})">Reset mot de passe</button>
           </div>
         </td>
@@ -320,7 +400,68 @@ function renderClientUsers() {
     `;
   }).join('');
 
-  host.innerHTML = `<table><thead><tr><th>Client</th><th>Utilisateur</th><th>Rôle</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<table><thead><tr><th>Client</th><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderAdminUsers() {
+  const host = q('adminUsersTable');
+  if (!host) return;
+
+  if (!state.admin_users.length) {
+    host.innerHTML = '<div class="muted">Aucun utilisateur admin.</div>';
+    return;
+  }
+
+  const rows = state.admin_users.map((u) => {
+    const activeText = Number(u.is_active) === 1 ? 'Actif' : 'Inactif';
+    const lastLogin = u.last_login_at ? escapeHtml(String(u.last_login_at)) : '—';
+    const hasEmail = String(u.email || '').trim() !== '';
+    return `
+      <tr>
+        <td>${escapeHtml(u.username || '')}</td>
+        <td>${escapeHtml(u.email || '')}</td>
+        <td>${activeText}</td>
+        <td>${lastLogin}</td>
+        <td>
+          <div class="row">
+            <button type="button" onclick="editAdminUser(${u.id})">Modifier</button>
+            <button type="button" onclick="toggleAdminUserActive(${u.id}, ${Number(u.is_active) === 1 ? 0 : 1})">${Number(u.is_active) === 1 ? 'Désactiver' : 'Activer'}</button>
+            <button type="button" onclick="sendAdminUserResetLink(${u.id})" ${hasEmail ? '' : 'disabled title="Email admin manquant"'}>${hasEmail ? 'Envoyer lien reset' : 'Email manquant'}</button>
+            <button type="button" onclick="resetAdminUserPassword(${u.id})">Reset mot de passe</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Utilisateur admin</th><th>Email</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderResetAudit() {
+  const host = q('resetAuditTable');
+  if (!host) return;
+
+  const rowsData = state.password_reset_audit || [];
+  if (!rowsData.length) {
+    host.innerHTML = '<div class="muted">Aucun envoi enregistré.</div>';
+    return;
+  }
+
+  const rows = rowsData.map((r) => {
+    const status = String(r.status || '').toLowerCase() === 'sent' ? 'Envoye' : 'Echec';
+    return `
+      <tr>
+        <td>${escapeHtml(r.created_at || '')}</td>
+        <td>${escapeHtml(r.user_type || '')}</td>
+        <td>${escapeHtml(r.username || '')}</td>
+        <td>${escapeHtml(r.email || '')}</td>
+        <td>${escapeHtml(status)}</td>
+        <td>${escapeHtml(r.error_message || '')}</td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Date</th><th>Type</th><th>Utilisateur</th><th>Email</th><th>Statut</th><th>Détail</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderChangeRequests() {
@@ -385,6 +526,99 @@ function renderChangeRequests() {
   updateRequestSelectionSummary();
 }
 
+function renderSupplierCreateRequests() {
+  const host = q('supplierCreateRequestsTable');
+  const rowsData = state.supplier_create_requests || [];
+  const summaryEl = q('supplierCreateRequestSummary');
+
+  if (summaryEl) {
+    const pendingCount = rowsData.filter(r => String(r.status || '') === 'pending').length;
+    summaryEl.textContent = `${rowsData.length} demande(s), dont ${pendingCount} en attente`;
+  }
+
+  if (!rowsData.length) {
+    host.innerHTML = '<div class="muted">Aucune demande de création pour ce filtre.</div>';
+    return;
+  }
+
+  const rows = rowsData.map((r) => {
+    const status = String(r.status || 'pending');
+    const rowBadgeClass = status === 'approved' ? 'status-ok' : (status === 'rejected' ? 'status-conflict' : 'status-warn');
+    const approvedName = escapeHtml(r.approved_supplier_name || '');
+    const reviewNote = escapeHtml(r.review_note || '');
+    const details = [
+      r.supplier_type ? `Type: ${escapeHtml(r.supplier_type)}` : '',
+      r.city ? `Ville: ${escapeHtml(r.city)}` : '',
+      r.email ? `Email: ${escapeHtml(r.email)}` : '',
+      r.phone ? `Tél: ${escapeHtml(r.phone)}` : '',
+      r.activity_text ? `Activités: ${escapeHtml(r.activity_text)}` : '',
+      r.labels_text ? `Labels: ${escapeHtml(r.labels_text)}` : '',
+    ].filter(Boolean).join(' | ');
+
+    return `
+      <tr>
+        <td>${escapeHtml(r.client_name || '')}</td>
+        <td>${escapeHtml(r.name || '')}</td>
+        <td>${details || '—'}</td>
+        <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
+        <td>${escapeHtml(r.requested_by_username || '')}</td>
+        <td>${escapeHtml(r.created_at || '')}</td>
+        <td>${approvedName || '—'}</td>
+        <td>${reviewNote || '—'}</td>
+        <td>
+          ${status === 'pending'
+            ? `<div class="row"><button type="button" onclick="reviewSupplierCreateRequest(${Number(r.id)}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewSupplierCreateRequest(${Number(r.id)}, 'rejected')">Refuser</button></div>`
+            : '<span class="muted">Traitée</span>'}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Client</th><th>Nom fournisseur</th><th>Détails</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Fournisseur créé</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderSupplierLinkRequests() {
+  const host = q('supplierLinkRequestsTable');
+  if (!host) return;
+
+  const rowsData = state.supplier_link_requests || [];
+  q('supplierLinkRequestSummary').textContent = `${rowsData.length} demande(s) de rattachement`;
+
+  if (!rowsData.length) {
+    host.innerHTML = '<div class="muted">Aucune demande de rattachement.</div>';
+    return;
+  }
+
+  const rows = rowsData.map((r) => {
+    const status = String(r.status || 'pending');
+    const rowBadgeClass = status === 'approved' ? 'status-approved' : status === 'rejected' ? 'status-rejected' : 'status-pending';
+    const supplierName = String(r.supplier_name || '').trim();
+    const supplierCity = String(r.supplier_city || '').trim();
+    const details = [supplierName, supplierCity].filter(Boolean).join(' | ');
+    const note = String(r.note || '').trim();
+    const reviewNote = String(r.review_note || '').trim();
+
+    return `
+      <tr>
+        <td>${escapeHtml(r.client_name || '')}</td>
+        <td>${escapeHtml(details || '—')}</td>
+        <td>${note ? escapeHtml(note) : '—'}</td>
+        <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
+        <td>${escapeHtml(r.requested_by_username || '')}</td>
+        <td>${escapeHtml(r.created_at || '')}</td>
+        <td>${reviewNote || '—'}</td>
+        <td>
+          ${status === 'pending'
+            ? `<div class="row"><button type="button" onclick="reviewSupplierLinkRequest(${Number(r.id)}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewSupplierLinkRequest(${Number(r.id)}, 'rejected')">Refuser</button></div>`
+            : '<span class="muted">Traitée</span>'}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Client</th><th>Fournisseur</th><th>Note client</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function updateRequestSelectionSummary() {
   const selectedCount = selectedChangeRequestIds.size;
   const selectedRows = (state.change_requests || []).filter(r => selectedChangeRequestIds.has(Number(r.id)));
@@ -433,6 +667,36 @@ async function loadChangeRequests() {
 
   state.change_requests = rows;
   renderChangeRequests();
+
+  const createStatusParam = status === 'all' ? '' : ('&status=' + encodeURIComponent(status));
+  const createClientParam = clientId > 0 ? ('&client_id=' + encodeURIComponent(String(clientId))) : '';
+  const createData = await fetch(apiBase + encodeURIComponent('admin/supplier-create-request/list') + createStatusParam + createClientParam, {
+    method: 'GET',
+    credentials: 'include',
+  }).then(async (resp) => {
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${resp.status}`);
+    return payload;
+  });
+
+  state.supplier_create_requests = createData.requests || [];
+  renderSupplierCreateRequests();
+
+  try {
+    const linkData = await fetch(apiBase + encodeURIComponent('admin/supplier-link-request/list') + createStatusParam + createClientParam, {
+      method: 'GET',
+      credentials: 'include',
+    }).then(async (resp) => {
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${resp.status}`);
+      return payload;
+    });
+    state.supplier_link_requests = linkData.requests || [];
+  } catch (linkErr) {
+    console.error('Erreur chargement demandes de rattachement:', linkErr);
+    state.supplier_link_requests = [];
+  }
+  renderSupplierLinkRequests();
 }
 
 function csvEscape(value) {
@@ -531,6 +795,38 @@ function hydrateSelects() {
   q('importClient').innerHTML = `<option value="">-- choisir --</option>${options}`;
   q('clientUserClientId').innerHTML = `<option value="">-- choisir --</option>${options}`;
   q('requestClientFilter').innerHTML = `<option value="">Tous les clients</option>${options}`;
+
+  const supplierFilterClient = q('supplierFilterClient');
+  if (supplierFilterClient) {
+    const previousValue = supplierFilterClient.value;
+    supplierFilterClient.innerHTML = `<option value="">Tous les clients</option>${options}`;
+    supplierFilterClient.value = previousValue;
+  }
+
+  const typeOptions = getSupplierTypeOptions()
+    .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+    .join('');
+  q('supplierType').innerHTML = `<option value="">Sélectionner un type</option>${typeOptions}`;
+
+  const supplierFilterType = q('supplierFilterType');
+  if (supplierFilterType) {
+    const previousValue = supplierFilterType.value;
+    supplierFilterType.innerHTML = `<option value="">Tous les types</option>${typeOptions}`;
+    supplierFilterType.value = previousValue;
+  }
+
+  const supplierFilterActivity = q('supplierFilterActivity');
+  if (supplierFilterActivity) {
+    const previousValue = supplierFilterActivity.value;
+    const activityOptions = getActivityOptions()
+      .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+      .join('');
+    supplierFilterActivity.innerHTML = `<option value="">Toutes les catégories</option>${activityOptions}`;
+    supplierFilterActivity.value = previousValue;
+  }
+
+  q('supplierActivitiesSelect').innerHTML = getActivityOptionsGroupedHtml('Ajouter une catégorie / activité...');
+  q('supplierLabelsSelect').innerHTML = renderSimpleOptionsHtmlUnselected(getLabelOptions(), 'Ajouter un label...');
 }
 
 function renderAll() {
@@ -538,12 +834,14 @@ function renderAll() {
     { key: 'name', label: 'Nom' },
     { key: 'client_type', label: 'Type' },
     { key: 'city', label: 'Ville' },
+    { key: 'public_label', label: 'Publication' },
     { key: 'opening_short', label: 'Horaires' },
     { key: 'email', label: 'Email' },
   ], state.clients.map(c => ({
     ...c,
+    public_label: Number(c.is_public) === 1 ? 'Oui' : 'Non',
     opening_short: summarizeOpeningHours(c),
-  })), 'editClient');
+  })), 'editClient', 'deleteClient');
 
   renderActivitiesByFamily();
 
@@ -558,6 +856,8 @@ function renderAll() {
 
   renderSuppliers();
   renderClientUsers();
+  renderAdminUsers();
+  renderResetAudit();
   hydrateSelects();
   renderVisualSettings();
   renderChangeRequests();
@@ -596,6 +896,15 @@ function renderVisualSettings() {
   if (q('visDefaultClient')) q('visDefaultClient').value = s.default_client_icon || '/assets/icons/default-client.svg';
   if (q('visDefaultProducer')) q('visDefaultProducer').value = s.default_producer_icon || '/assets/icons/default-producer.svg';
   if (q('visFarmDirect')) q('visFarmDirect').value = s.farm_direct_icon || 'https://i.imgur.com/DTHAKrv.jpeg';
+  if (q('visAdminNotificationEmails')) q('visAdminNotificationEmails').value = s.admin_notification_emails || '';
+  if (q('visPublicAssetsBaseUrl')) q('visPublicAssetsBaseUrl').value = s.public_assets_base_url || '';
+  if (q('visSmtpHost')) q('visSmtpHost').value = s.smtp_host || '';
+  if (q('visSmtpPort')) q('visSmtpPort').value = s.smtp_port || '';
+  if (q('visSmtpEncryption')) q('visSmtpEncryption').value = s.smtp_encryption || 'tls';
+  if (q('visSmtpUsername')) q('visSmtpUsername').value = s.smtp_username || '';
+  if (q('visSmtpPassword')) q('visSmtpPassword').value = s.smtp_password || '';
+  if (q('visSmtpFromEmail')) q('visSmtpFromEmail').value = s.smtp_from_email || '';
+  if (q('visSmtpFromName')) q('visSmtpFromName').value = s.smtp_from_name || '';
 }
 
 const importFieldDefs = [
@@ -1122,6 +1431,55 @@ function splitDelimitedUnique(value) {
       .map(v => v.trim())
       .filter(Boolean)
   ));
+}
+
+function setSupplierPickerValues(selectId, hiddenId, chipsId, values) {
+  const selectEl = q(selectId);
+  const hiddenEl = q(hiddenId);
+  const chipsEl = q(chipsId);
+  if (!selectEl || !hiddenEl || !chipsEl) return;
+
+  const list = splitDelimitedUnique((values || []).join('; '));
+  hiddenEl.value = list.join('; ');
+
+  chipsEl.innerHTML = list.map(v => [
+    '<span class="multi-chip">',
+    escapeHtml(v),
+    '<span class="multi-chip-remove" data-supplier-chip-remove="1" data-supplier-select="' + escapeHtml(selectId) + '" data-supplier-value="' + escapeHtml(v) + '" title="Retirer">x</span>',
+    '</span>'
+  ].join('')).join('');
+
+  selectEl.value = '';
+}
+
+function getSupplierPickerValues(hiddenId) {
+  return splitDelimitedUnique(q(hiddenId)?.value || '');
+}
+
+function bindSupplierPicker(selectId, hiddenId, chipsId) {
+  const selectEl = q(selectId);
+  const hiddenEl = q(hiddenId);
+  const chipsEl = q(chipsId);
+  if (!selectEl || !hiddenEl || !chipsEl) return;
+
+  selectEl.addEventListener('change', () => {
+    const value = String(selectEl.value || '').trim();
+    if (!value) return;
+
+    const current = getSupplierPickerValues(hiddenId);
+    if (!current.some(v => normalizeHeaderName(v) === normalizeHeaderName(value))) {
+      current.push(value);
+    }
+    setSupplierPickerValues(selectId, hiddenId, chipsId, current);
+  });
+
+  chipsEl.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-supplier-chip-remove="1"][data-supplier-select][data-supplier-value]');
+    if (!btn) return;
+    const value = String(btn.getAttribute('data-supplier-value') || '').trim();
+    const filtered = getSupplierPickerValues(hiddenId).filter(v => normalizeHeaderName(v) !== normalizeHeaderName(value));
+    setSupplierPickerValues(selectId, hiddenId, chipsId, filtered);
+  });
 }
 
 function getSupplierTypeOptions() {
@@ -1839,6 +2197,8 @@ async function loadBootstrap() {
   const data = await api('admin/bootstrap');
   state.clients = data.clients || [];
   state.client_users = data.client_users || [];
+  state.admin_users = data.admin_users || [];
+  state.password_reset_audit = data.password_reset_audit || [];
   state.activities = data.activities || [];
   state.labels = data.labels || [];
   state.supplier_types = data.supplier_types || [];
@@ -1852,7 +2212,33 @@ function resetSupplierForm() {
   q('formSupplier').reset();
   q('supplierId').value = '';
   q('supplierCountry').value = 'France';
+  q('supplierSlug').value = '';
+  q('supplierDescriptionShort').value = '';
+  q('supplierDescriptionLong').value = '';
+  q('supplierIsPublic').checked = true;
+  setSupplierPickerValues('supplierActivitiesSelect', 'supplierActivities', 'supplierActivitiesChips', []);
+  setSupplierPickerValues('supplierLabelsSelect', 'supplierLabels', 'supplierLabelsChips', []);
 }
+
+window.deleteClient = async function deleteClient(id) {
+  const c = state.clients.find(x => Number(x.id) === Number(id));
+  if (!c) return;
+  if (!window.confirm(`Supprimer le client "${c.name}" ? Cette action est irréversible.`)) return;
+  q('clientMsg').textContent = '';
+  try {
+    await api('admin/client/delete', 'POST', { id });
+    q('clientMsg').textContent = 'Client supprimé';
+    if (Number(q('clientId').value) === Number(id)) {
+      q('formClient').reset();
+      q('clientId').value = '';
+      q('clientLogoPath').value = '';
+      q('clientLogoPreview').innerHTML = '';
+    }
+    await loadBootstrap();
+  } catch (e) {
+    q('clientMsg').textContent = e.message;
+  }
+};
 
 window.editClient = function editClient(id) {
   const c = state.clients.find(x => Number(x.id) === Number(id));
@@ -1863,14 +2249,22 @@ window.editClient = function editClient(id) {
   q('clientEmail').value = c.email || '';
   q('clientPhone').value = c.phone || '';
   q('clientWebsite').value = c.website || '';
+  q('clientSlug').value = c.slug || '';
+  q('clientFacebook').value = c.facebook_url || '';
+  q('clientInstagram').value = c.instagram_url || '';
+  q('clientLinkedin').value = c.linkedin_url || '';
   q('clientLogo').value = c.logo_url || '';
   q('clientLogoPath').value = c.logo_url || '';
+  q('clientCoverUrl').value = c.photo_cover_url || '';
   q('clientAddress').value = c.address || '';
   q('clientCity').value = c.city || '';
   q('clientPostal').value = c.postal_code || '';
   q('clientCountry').value = c.country || '';
   q('clientLat').value = c.latitude || '';
   q('clientLng').value = c.longitude || '';
+  q('clientDescriptionShort').value = c.description_short || '';
+  q('clientDescriptionLong').value = c.description_long || '';
+  q('clientIsPublic').checked = Number(c.is_public) === 1;
   q('clientMonday').value = c.lundi || '';
   q('clientTuesday').value = c.mardi || '';
   q('clientWednesday').value = c.mercredi || '';
@@ -1887,6 +2281,7 @@ window.editClientUser = function editClientUser(id) {
   q('clientUserId').value = u.id;
   q('clientUserClientId').value = u.client_id || '';
   q('clientUserUsername').value = u.username || '';
+  q('clientUserEmail').value = u.email || '';
   q('clientUserRole').value = u.role || 'client_manager';
   q('clientUserPassword').value = '';
   q('clientUserIsActive').checked = Number(u.is_active) === 1;
@@ -1925,6 +2320,85 @@ window.resetClientUserPassword = async function resetClientUserPassword(id) {
   }
 };
 
+window.sendClientUserResetLink = async function sendClientUserResetLink(id) {
+  const u = state.client_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  if (!String(u.email || '').trim()) {
+    q('clientUserMsg').textContent = 'Ajoute un email à cet utilisateur avant envoi du lien';
+    return;
+  }
+  if (!window.confirm(`Envoyer un lien de réinitialisation à ${u.email || 'cet utilisateur'} ?`)) return;
+
+  q('clientUserMsg').textContent = '';
+  try {
+    await api('admin/client-user/send-reset-link', 'POST', { id });
+    q('clientUserMsg').textContent = 'Lien de réinitialisation envoyé';
+  } catch (e) {
+    q('clientUserMsg').textContent = e.message;
+  }
+};
+
+window.editAdminUser = function editAdminUser(id) {
+  const u = state.admin_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  q('adminUserId').value = u.id;
+  q('adminUserUsername').value = u.username || '';
+  q('adminUserEmail').value = u.email || '';
+  q('adminUserPassword').value = '';
+  q('adminUserIsActive').checked = Number(u.is_active) === 1;
+  q('adminUserMsg').textContent = `Edition admin: ${u.username || ''}`;
+};
+
+window.toggleAdminUserActive = async function toggleAdminUserActive(id, isActive) {
+  const u = state.admin_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  const label = isActive ? 'activer' : 'désactiver';
+  if (!window.confirm(`${label.charAt(0).toUpperCase() + label.slice(1)} le compte admin "${u.username}" ?`)) return;
+
+  q('adminUserMsg').textContent = '';
+  try {
+    await api('admin/admin-user/toggle-active', 'POST', { id, is_active: !!isActive });
+    q('adminUserMsg').textContent = 'Statut admin mis à jour';
+    await loadBootstrap();
+  } catch (e) {
+    q('adminUserMsg').textContent = e.message;
+  }
+};
+
+window.resetAdminUserPassword = async function resetAdminUserPassword(id) {
+  const u = state.admin_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  const value = window.prompt(`Nouveau mot de passe pour ${u.username} (12 caractères min):`, '');
+  if (value === null) return;
+  const newPassword = String(value || '').trim();
+
+  q('adminUserMsg').textContent = '';
+  try {
+    await api('admin/admin-user/reset-password', 'POST', { id, new_password: newPassword });
+    q('adminUserMsg').textContent = 'Mot de passe admin réinitialisé';
+  } catch (e) {
+    q('adminUserMsg').textContent = e.message;
+  }
+};
+
+window.sendAdminUserResetLink = async function sendAdminUserResetLink(id) {
+  const u = state.admin_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  if (!String(u.email || '').trim()) {
+    q('adminUserMsg').textContent = 'Ajoute un email à cet admin avant envoi du lien';
+    return;
+  }
+  if (!window.confirm(`Envoyer un lien de réinitialisation à ${u.email || 'cet admin'} ?`)) return;
+
+  q('adminUserMsg').textContent = '';
+  try {
+    await api('admin/admin-user/send-reset-link', 'POST', { id });
+    q('adminUserMsg').textContent = 'Lien de réinitialisation envoyé';
+  } catch (e) {
+    q('adminUserMsg').textContent = e.message;
+  }
+};
+
 window.reviewChangeRequest = async function reviewChangeRequest(id, decision) {
   const request = state.change_requests.find(x => Number(x.id) === Number(id));
   if (!request) return;
@@ -1942,6 +2416,52 @@ window.reviewChangeRequest = async function reviewChangeRequest(id, decision) {
       review_note: reviewNote,
     });
     q('requestMsg').textContent = `Demande #${id} traitée (${decision})`;
+    await loadBootstrap();
+  } catch (e) {
+    q('requestMsg').textContent = e.message;
+  }
+};
+
+window.reviewSupplierCreateRequest = async function reviewSupplierCreateRequest(id, decision) {
+  const request = state.supplier_create_requests.find(x => Number(x.id) === Number(id));
+  if (!request) return;
+
+  const actionLabel = decision === 'approved' ? 'approuver' : 'refuser';
+  if (!window.confirm(`Confirmer: ${actionLabel} la demande de création #${id} ?`)) return;
+
+  const reviewNote = window.prompt('Note admin (optionnelle):', '') ?? '';
+
+  q('requestMsg').textContent = '';
+  try {
+    await api('admin/supplier-create-request/review', 'POST', {
+      id,
+      decision,
+      review_note: reviewNote,
+    });
+    q('requestMsg').textContent = `Demande création #${id} traitée (${decision})`;
+    await loadBootstrap();
+  } catch (e) {
+    q('requestMsg').textContent = e.message;
+  }
+};
+
+window.reviewSupplierLinkRequest = async function reviewSupplierLinkRequest(id, decision) {
+  const request = state.supplier_link_requests.find(x => Number(x.id) === Number(id));
+  if (!request) return;
+
+  const actionLabel = decision === 'approved' ? 'approuver' : 'refuser';
+  if (!window.confirm(`Confirmer: ${actionLabel} la demande de rattachement #${id} ?`)) return;
+
+  const reviewNote = window.prompt('Note admin (optionnelle):', '') ?? '';
+
+  q('requestMsg').textContent = '';
+  try {
+    await api('admin/supplier-link-request/review', 'POST', {
+      id,
+      decision,
+      review_note: reviewNote,
+    });
+    q('requestMsg').textContent = `Demande rattachement #${id} traitée (${decision})`;
     await loadBootstrap();
   } catch (e) {
     q('requestMsg').textContent = e.message;
@@ -2074,17 +2594,26 @@ window.editSupplier = function editSupplier(id) {
   q('supplierId').value = supplier.id;
   q('supplierName').value = supplier.name || '';
   q('supplierType').value = supplier.supplier_type || '';
-  q('supplierActivities').value = supplier.activity_text || '';
-  q('supplierLabels').value = supplier.labels || '';
+  setSupplierPickerValues('supplierActivitiesSelect', 'supplierActivities', 'supplierActivitiesChips', splitDelimitedUnique(supplier.activity_text || ''));
+  setSupplierPickerValues('supplierLabelsSelect', 'supplierLabels', 'supplierLabelsChips', splitDelimitedUnique(supplier.labels || ''));
   q('supplierPhone').value = supplier.phone || '';
   q('supplierEmail').value = supplier.email || '';
   q('supplierWebsite').value = supplier.website || '';
+  q('supplierSlug').value = supplier.slug || '';
+  q('supplierFacebook').value = supplier.facebook_url || '';
+  q('supplierInstagram').value = supplier.instagram_url || '';
+  q('supplierLinkedin').value = supplier.linkedin_url || '';
+  q('supplierLogoUrl').value = supplier.logo_url || '';
+  q('supplierCoverUrl').value = supplier.photo_cover_url || '';
   q('supplierAddress').value = supplier.address || '';
   q('supplierCity').value = supplier.city || '';
   q('supplierPostal').value = supplier.postal_code || '';
   q('supplierCountry').value = supplier.country || 'France';
   q('supplierLat').value = supplier.latitude || '';
   q('supplierLng').value = supplier.longitude || '';
+  q('supplierDescriptionShort').value = supplier.description_short || '';
+  q('supplierDescriptionLong').value = supplier.description_long || '';
+  q('supplierIsPublic').checked = Number(supplier.is_public) === 1;
 
   const selectedClientIds = String(supplier.client_ids || '')
     .split(',')
@@ -2157,6 +2686,9 @@ window.deleteSupplier = async function deleteSupplier(id) {
 };
 
 function bindEvents() {
+  bindSupplierPicker('supplierActivitiesSelect', 'supplierActivities', 'supplierActivitiesChips');
+  bindSupplierPicker('supplierLabelsSelect', 'supplierLabels', 'supplierLabelsChips');
+
   q('btnLogin').addEventListener('click', async () => {
     q('loginMsg').textContent = '';
     try {
@@ -2207,7 +2739,14 @@ function bindEvents() {
         email: q('clientEmail').value,
         phone: q('clientPhone').value,
         website: q('clientWebsite').value,
+        slug: q('clientSlug').value,
+        facebook_url: q('clientFacebook').value,
+        instagram_url: q('clientInstagram').value,
+        linkedin_url: q('clientLinkedin').value,
         logo_url: logoUrl,
+        photo_cover_url: q('clientCoverUrl').value,
+        description_short: q('clientDescriptionShort').value,
+        description_long: q('clientDescriptionLong').value,
         address: q('clientAddress').value,
         city: q('clientCity').value,
         postal_code: q('clientPostal').value,
@@ -2221,6 +2760,7 @@ function bindEvents() {
         vendredi: normalizeOpeningHours(q('clientFriday').value),
         samedi: normalizeOpeningHours(q('clientSaturday').value),
         dimanche: normalizeOpeningHours(q('clientSunday').value),
+        is_public: q('clientIsPublic').checked,
         is_active: true,
       });
       q('clientMsg').textContent = 'Client enregistré';
@@ -2228,6 +2768,11 @@ function bindEvents() {
       q('clientId').value = '';
       q('clientLogoPath').value = '';
       q('clientLogoPreview').innerHTML = '';
+      q('clientSlug').value = '';
+      q('clientCoverUrl').value = '';
+      q('clientDescriptionShort').value = '';
+      q('clientDescriptionLong').value = '';
+      q('clientIsPublic').checked = true;
       q('clientMonday').value = '';
       q('clientTuesday').value = '';
       q('clientWednesday').value = '';
@@ -2241,6 +2786,10 @@ function bindEvents() {
     }
   });
 
+  q('btnExportClients').addEventListener('click', () => {
+    window.open('../api/index.php?action=' + encodeURIComponent('admin/client/export'), '_blank');
+  });
+
   q('btnSaveClientUser').addEventListener('click', async () => {
     q('clientUserMsg').textContent = '';
     try {
@@ -2248,6 +2797,7 @@ function bindEvents() {
         id: q('clientUserId').value || null,
         client_id: Number(q('clientUserClientId').value || 0),
         username: q('clientUserUsername').value,
+        email: q('clientUserEmail').value,
         role: q('clientUserRole').value,
         password: q('clientUserPassword').value,
         is_active: q('clientUserIsActive').checked,
@@ -2256,11 +2806,34 @@ function bindEvents() {
       q('clientUserMsg').textContent = q('clientUserId').value ? 'Utilisateur client modifié' : 'Utilisateur client créé';
       q('formClientUser').reset();
       q('clientUserId').value = '';
+      q('clientUserEmail').value = '';
       q('clientUserRole').value = 'client_manager';
       q('clientUserIsActive').checked = true;
       await loadBootstrap();
     } catch (e) {
       q('clientUserMsg').textContent = e.message;
+    }
+  });
+
+  q('btnSaveAdminUser').addEventListener('click', async () => {
+    q('adminUserMsg').textContent = '';
+    try {
+      await api('admin/admin-user/save', 'POST', {
+        id: q('adminUserId').value || null,
+        username: q('adminUserUsername').value,
+        email: q('adminUserEmail').value,
+        password: q('adminUserPassword').value,
+        is_active: q('adminUserIsActive').checked,
+      });
+
+      q('adminUserMsg').textContent = q('adminUserId').value ? 'Utilisateur admin modifié' : 'Utilisateur admin créé';
+      q('formAdminUser').reset();
+      q('adminUserId').value = '';
+      q('adminUserEmail').value = '';
+      q('adminUserIsActive').checked = true;
+      await loadBootstrap();
+    } catch (e) {
+      q('adminUserMsg').textContent = e.message;
     }
   });
 
@@ -2382,12 +2955,21 @@ function bindEvents() {
         phone: q('supplierPhone').value,
         email: q('supplierEmail').value,
         website: q('supplierWebsite').value,
+        slug: q('supplierSlug').value,
+        facebook_url: q('supplierFacebook').value,
+        instagram_url: q('supplierInstagram').value,
+        linkedin_url: q('supplierLinkedin').value,
+        logo_url: q('supplierLogoUrl').value,
+        photo_cover_url: q('supplierCoverUrl').value,
         address: q('supplierAddress').value,
         city: q('supplierCity').value,
         postal_code: q('supplierPostal').value,
         country: q('supplierCountry').value,
         latitude: q('supplierLat').value,
         longitude: q('supplierLng').value,
+        description_short: q('supplierDescriptionShort').value,
+        description_long: q('supplierDescriptionLong').value,
+        is_public: q('supplierIsPublic').checked,
         client_ids: selectedMultiValues(q('supplierClients')),
       });
       q('supplierMsg').textContent = q('supplierId').value ? 'Fournisseur modifié' : 'Fournisseur enregistré';
@@ -2411,6 +2993,39 @@ function bindEvents() {
     } catch (e) {
       q('supplierMsg').textContent = e.message;
     }
+  });
+
+  q('btnExportProducersAll').addEventListener('click', () => {
+    window.open('../api/index.php?action=' + encodeURIComponent('admin/producer/export'), '_blank');
+  });
+
+  q('btnExportProducersChanged').addEventListener('click', () => {
+    const params = new URLSearchParams({ action: 'admin/producer/export', scope: 'changed' });
+    window.open('../api/index.php?' + params.toString(), '_blank');
+  });
+
+  q('supplierFilterText').addEventListener('input', () => {
+    renderSuppliers();
+  });
+
+  q('supplierFilterClient').addEventListener('change', () => {
+    renderSuppliers();
+  });
+
+  q('supplierFilterActivity').addEventListener('change', () => {
+    renderSuppliers();
+  });
+
+  q('supplierFilterType').addEventListener('change', () => {
+    renderSuppliers();
+  });
+
+  q('btnResetSupplierFilters').addEventListener('click', () => {
+    q('supplierFilterText').value = '';
+    q('supplierFilterClient').value = '';
+    q('supplierFilterActivity').value = '';
+    q('supplierFilterType').value = '';
+    renderSuppliers();
   });
 
   q('btnPreviewImport').addEventListener('click', async () => {
@@ -2621,9 +3236,30 @@ function bindEvents() {
         default_client_icon: q('visDefaultClient').value,
         default_producer_icon: q('visDefaultProducer').value,
         farm_direct_icon: q('visFarmDirect').value,
+        admin_notification_emails: q('visAdminNotificationEmails').value,
+        public_assets_base_url: q('visPublicAssetsBaseUrl').value,
+        smtp_host: q('visSmtpHost').value,
+        smtp_port: q('visSmtpPort').value,
+        smtp_encryption: q('visSmtpEncryption').value,
+        smtp_username: q('visSmtpUsername').value,
+        smtp_password: q('visSmtpPassword').value,
+        smtp_from_email: q('visSmtpFromEmail').value,
+        smtp_from_name: q('visSmtpFromName').value,
       });
       q('visualMsg').textContent = 'Paramètres visuels enregistrés';
       await loadBootstrap();
+    } catch (e) {
+      q('visualMsg').textContent = e.message;
+    }
+  });
+
+  q('btnTestNotification').addEventListener('click', async () => {
+    q('visualMsg').textContent = '';
+    try {
+      await api('admin/notification/test', 'POST', {
+        to: q('visSmtpTestTo').value,
+      });
+      q('visualMsg').textContent = 'Email de test envoyé';
     } catch (e) {
       q('visualMsg').textContent = e.message;
     }

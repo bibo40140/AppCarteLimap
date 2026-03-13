@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tutoriel Espace Client - Carte Limap</title>
+  <style>
+    :root {
+      --bg: #f7f4ee;
+      --paper: #fffdf9;
+      --ink: #1f2a1f;
+      --muted: #5d675d;
+      --brand: #1f7a3f;
+      --brand-2: #e6f3ea;
+      --line: #d9e2d9;
+      --warn: #9c2f2f;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, #f2ead7 0, transparent 40%),
+        radial-gradient(circle at 80% 100%, #e5f1e6 0, transparent 35%),
+        var(--bg);
+      line-height: 1.55;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    .hero {
+      background: linear-gradient(140deg, #1f7a3f 0%, #245a34 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.12);
+    }
+
+    h1 { margin: 0 0 6px; font-size: 30px; }
+    .sub { margin: 0; opacity: .95; }
+
+    .card {
+      margin-top: 16px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      color: var(--brand);
+      font-size: 22px;
+    }
+
+    h3 {
+      margin: 16px 0 6px;
+      font-size: 18px;
+    }
+
+    p { margin: 8px 0; }
+
+    ul, ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li { margin: 6px 0; }
+
+    .tip {
+      background: var(--brand-2);
+      border-left: 4px solid var(--brand);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .warn {
+      background: #fdeeee;
+      border-left: 4px solid var(--warn);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .steps {
+      counter-reset: steps;
+      list-style: none;
+      margin: 8px 0 8px 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .steps li {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .steps li::before {
+      counter-increment: steps;
+      content: counter(steps);
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--brand);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mini {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 14px;
+      word-break: break-all;
+    }
+
+    .foot {
+      margin-top: 20px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      h1 { font-size: 25px; }
+      .grid { grid-template-columns: 1fr; }
+      .hero { padding: 18px; }
+      .card { padding: 14px; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .hero { box-shadow: none; }
+      .card, .mini { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Tutoriel Espace Client</h1>
+      <p class="sub">Carte Limap &mdash; Guide rapide pour consulter les producteurs et envoyer vos demandes de mise à jour.</p>
+    </section>
+
+    <section class="card">
+      <h2>1. Accès à l'espace client</h2>
+      <p>Ouvrez la page suivante dans votre navigateur :</p>
+      <p class="mono">https://limap.fr/Carte/client/index.html</p>
+      <ol class="steps">
+        <li><div><strong>Saisissez votre identifiant et votre mot de passe.</strong><br />Ces informations vous sont envoyées par Limap.</div></li>
+        <li><div><strong>Cliquez sur Se connecter.</strong><br />Vous arrivez sur votre espace avec la liste des producteurs liés à votre structure.</div></li>
+      </ol>
+      <div class="tip">
+        Astuce : si vous ne voyez pas vos dernières modifications, rechargez la page avec Ctrl&nbsp;+&nbsp;F5.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Que pouvez-vous faire dans l'espace client</h2>
+      <div class="grid">
+        <article class="mini">
+          <h3>Profil client</h3>
+          <p>Mettre à jour les informations de votre structure (coordonnées, site web, etc.).</p>
+        </article>
+        <article class="mini">
+          <h3>Fiches producteurs</h3>
+          <p>Renseigner vos informations de relation client pour un producteur (notes, statut, catégories utiles pour votre suivi).</p>
+        </article>
+        <article class="mini">
+          <h3>Demande de modification globale</h3>
+          <p>Proposer une correction sur une fiche producteur (adresse, contact, activités, etc.).</p>
+        </article>
+        <article class="mini">
+          <h3>Demande de création</h3>
+          <p>Proposer un nouveau producteur à ajouter à la carte.</p>
+        </article>
+        <article class="mini">
+          <h3>Rattachement fournisseur existant</h3>
+          <p>Demander à ce qu'un producteur déjà présent dans la base soit rattaché à votre structure.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Comprendre la fiche globale du producteur</h2>
+      <p>Chaque producteur possède une <strong>fiche globale unique</strong> dans la plateforme.</p>
+      <ul>
+        <li>Cette fiche contient les informations communes à tous les clients : nom, adresse, téléphone, email, site web, activités, labels.</li>
+        <li>L'objectif est d'éviter les doublons et d'avoir une base fiable partagée.</li>
+        <li>Les modifications de cette fiche passent par une validation admin pour garantir la qualité des données.</li>
+      </ul>
+      <div class="tip">
+        En plus de la fiche globale, votre espace client contient vos propres informations de relation (notes, statut, suivi), visibles pour votre structure uniquement.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4. Modifier une fiche producteur (votre espace client)</h2>
+      <ol class="steps">
+        <li><div><strong>Ouvrez le producteur concerné.</strong><br />Utilisez la recherche ou la liste.</div></li>
+        <li><div><strong>Modifiez les champs de votre profil client.</strong><br />Exemple : statut de relation, notes internes, catégories de suivi.</div></li>
+        <li><div><strong>Enregistrez.</strong><br />La mise à jour est immédiate dans votre espace client.</div></li>
+      </ol>
+      <div class="warn">
+        Important : certaines modifications touchant la fiche globale du producteur passent par une validation admin.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>5. Envoyer une demande de modification globale</h2>
+      <ol class="steps">
+        <li><div><strong>Choisissez le producteur.</strong></div></li>
+        <li><div><strong>Sélectionnez le champ à corriger.</strong><br />Exemple : téléphone, email, adresse, site web, activités, labels.</div></li>
+        <li><div><strong>Saisissez la nouvelle valeur et, si possible, une justification.</strong></div></li>
+        <li><div><strong>Envoyez la demande.</strong><br />Elle apparaît en statut &laquo;&nbsp;En attente&nbsp;&raquo;.</div></li>
+      </ol>
+      <p>Une fois traitée par l'administrateur, le statut passe en &laquo;&nbsp;Approuvée&nbsp;&raquo; ou &laquo;&nbsp;Refusée&nbsp;&raquo;.</p>
+    </section>
+
+    <section class="card">
+      <h2>6. Vérifier qu'un producteur n'existe pas déjà</h2>
+      <ol class="steps">
+        <li><div><strong>Depuis l'espace client, vérifiez d'abord votre périmètre.</strong><br />Testez plusieurs mots-clés : nom exact, nom partiel, ville.</div></li>
+        <li><div><strong>Puis vérifiez sur la carte publique Limap :</strong><br />
+          &bull; Carte interactive : <a href="https://limap.fr/map/" target="_blank" class="mono">https://limap.fr/map/</a><br />
+          &bull; Page producteurs : <a href="https://limap.fr/producteurs/" target="_blank" class="mono">https://limap.fr/producteurs/</a>
+        </div></li>
+        <li><div><strong>Vérifiez les variantes d'écriture.</strong><br />Exemple : GAEC, EARL, accents, tirets, abréviations.</div></li>
+      </ol>
+      <div class="warn">
+        Règle importante : si le producteur existe déjà, ne pas créer une nouvelle fiche.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>7. Si le producteur existe déjà mais n'est pas lié à votre client</h2>
+      <p>Vous pouvez envoyer une <strong>demande de rattachement directement depuis votre espace client</strong>, sans contacter Limap par email.</p>
+      <ol class="steps">
+        <li><div><strong>Dans votre espace client, allez sur l'onglet &laquo;&nbsp;Nouveau fournisseur&nbsp;&raquo;.</strong></div></li>
+        <li><div><strong>Faites défiler jusqu'à la section &laquo;&nbsp;Rattacher un fournisseur déjà existant&nbsp;&raquo;.</strong></div></li>
+        <li><div><strong>Tapez le nom du producteur dans le champ de recherche</strong> (au moins 2 caractères).<br />Les résultats affichent les producteurs de la base qui ne sont pas encore liés à votre structure.</div></li>
+        <li><div><strong>Identifiez le bon producteur et cliquez &laquo;&nbsp;Demander le rattachement&nbsp;&raquo;.</strong><br />Vous pouvez ajouter une note pour donner du contexte à l'administrateur.</div></li>
+        <li><div><strong>Attendez la validation admin.</strong><br />Le producteur apparaîtra ensuite dans votre liste.</div></li>
+      </ol>
+      <div class="tip">
+        Votre demande est visible dans l'historique juste en dessous, avec son statut (En attente, Approuvée, Refusée).
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>8. Proposer un nouveau producteur</h2>
+      <p>Si le producteur n'existe pas encore dans la base (après vérification, cf. section 6), vous pouvez proposer sa création.</p>
+      <ol class="steps">
+        <li><div><strong>Allez sur l'onglet &laquo;&nbsp;Nouveau fournisseur&nbsp;&raquo;.</strong></div></li>
+        <li><div><strong>Renseignez les informations principales.</strong><br />Nom, localisation, contact, activités, type, site web.</div></li>
+        <li><div><strong>Envoyez la demande.</strong><br />L'administrateur vérifie puis valide ou refuse. En cas de validation, le producteur sera créé et rattaché à votre client.</div></li>
+      </ol>
+      <div class="tip">
+        <strong>Vous avez une grande base de données existante ?</strong><br />
+        Si vous avez déjà une liste importante de producteurs (dans un fichier Excel par exemple), il est beaucoup plus rapide de nous envoyer directement ce fichier &mdash; nous pouvons importer tous vos producteurs en une seule opération, sans que vous ayez à tout saisir un par un. Contactez l'équipe Limap pour en discuter.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>9. Mot de passe oublié</h2>
+      <ol class="steps">
+        <li><div><strong>Depuis la page de connexion, cliquez sur &laquo;&nbsp;Mot de passe oublié&nbsp;&raquo;.</strong></div></li>
+        <li><div><strong>Saisissez votre email utilisateur.</strong></div></li>
+        <li><div><strong>Consultez votre boîte mail et suivez le lien de réinitialisation.</strong></div></li>
+        <li><div><strong>Définissez un nouveau mot de passe.</strong></div></li>
+      </ol>
+      <div class="tip">
+        Si vous ne recevez pas le message, vérifiez les dossiers Spam et Promotions.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>10. Bonnes pratiques</h2>
+      <ul>
+        <li>Vérifier les informations avant envoi (email, téléphone, ville, code postal).</li>
+        <li>Ajouter un commentaire clair pour accélérer la validation admin.</li>
+        <li>Éviter les doublons : chercher un producteur avant de proposer une création.</li>
+        <li>Ne pas partager votre mot de passe.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>11. Support</h2>
+      <p>En cas de problème de connexion ou de doute sur une demande, contactez l'équipe Limap.</p>
+      <p>Incluez si possible : nom du compte, page concernée, message d'erreur, et capture écran.</p>
+    </section>
+
+    <p class="foot">Document client &mdash; Carte Limap</p>
+  </main>
+</body>
+</html>

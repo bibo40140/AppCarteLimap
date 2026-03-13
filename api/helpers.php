@@ -1,9 +1,24 @@
 <?php
 
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strpos($haystack, $needle) === 0;
+    }
+}
+
 function start_app_session(): void
 {
     $config = require __DIR__ . '/config.php';
     if (session_status() === PHP_SESSION_NONE) {
+        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => '/',
+            'secure' => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
         session_name($config['session_name']);
         session_start();
     }
@@ -14,6 +29,28 @@ function json_response(array $payload, int $status = 200): void
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function csv_response(array $headers, array $rows, string $filename): void
+{
+    http_response_code(200);
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    $out = fopen('php://output', 'w');
+    if ($out === false) {
+        exit;
+    }
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, $headers, ';');
+    foreach ($rows as $row) {
+        $line = [];
+        foreach ($headers as $header) {
+            $line[] = $row[$header] ?? '';
+        }
+        fputcsv($out, $line, ';');
+    }
+    fclose($out);
     exit;
 }
 
@@ -37,6 +74,14 @@ function normalize_text(string $value): string
     $value = preg_replace('/[^a-z0-9\s]/', ' ', $value);
     $value = preg_replace('/\s+/', ' ', $value);
     return trim((string) $value);
+}
+
+function slugify_text(string $value): string
+{
+    $normalized = normalize_text($value);
+    $slug = preg_replace('/\s+/', '-', $normalized);
+    $slug = trim((string)$slug, '-');
+    return $slug !== '' ? $slug : 'client';
 }
 
 function normalize_phone(?string $value): string

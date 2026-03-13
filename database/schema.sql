@@ -25,11 +25,21 @@ CREATE TABLE IF NOT EXISTS clients (
   samedi VARCHAR(255) NULL,
   dimanche VARCHAR(255) NULL,
   website VARCHAR(255) NULL,
+  facebook_url VARCHAR(255) NULL,
+  instagram_url VARCHAR(255) NULL,
+  linkedin_url VARCHAR(255) NULL,
   logo_url VARCHAR(255) NULL,
+  photo_cover_url VARCHAR(255) NULL,
+  slug VARCHAR(190) NULL,
+  description_short TEXT NULL,
+  description_long TEXT NULL,
+  is_public TINYINT(1) NOT NULL DEFAULT 1,
+  public_updated_at DATETIME NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_clients_name (name)
+  INDEX idx_clients_name (name),
+  INDEX idx_clients_slug (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS activities (
@@ -65,6 +75,16 @@ CREATE TABLE IF NOT EXISTS suppliers (
   phone VARCHAR(60) NULL,
   email VARCHAR(190) NULL,
   website VARCHAR(255) NULL,
+  facebook_url VARCHAR(255) NULL,
+  instagram_url VARCHAR(255) NULL,
+  linkedin_url VARCHAR(255) NULL,
+  logo_url VARCHAR(255) NULL,
+  photo_cover_url VARCHAR(255) NULL,
+  slug VARCHAR(190) NULL,
+  description_short TEXT NULL,
+  description_long TEXT NULL,
+  is_public TINYINT(1) NOT NULL DEFAULT 1,
+  public_updated_at DATETIME NULL,
   supplier_type VARCHAR(120) NULL,
   activity_text VARCHAR(255) NULL,
   notes TEXT NULL,
@@ -72,7 +92,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_suppliers_norm_name_city (normalized_name, city),
   INDEX idx_suppliers_phone (phone),
-  INDEX idx_suppliers_email (email)
+  INDEX idx_suppliers_email (email),
+  INDEX idx_suppliers_slug (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS supplier_activities (
@@ -130,6 +151,7 @@ CREATE TABLE IF NOT EXISTS client_users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_id INT NOT NULL,
   username VARCHAR(120) NOT NULL,
+  email VARCHAR(190) NULL,
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(30) NOT NULL DEFAULT 'client_manager',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -139,6 +161,44 @@ CREATE TABLE IF NOT EXISTS client_users (
   UNIQUE KEY uq_client_users_username (username),
   INDEX idx_client_users_client (client_id),
   CONSTRAINT fk_client_users_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(120) NOT NULL,
+  email VARCHAR(190) NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_admin_users_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_type VARCHAR(20) NOT NULL,
+  user_id INT NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_password_reset_lookup (user_type, user_id),
+  INDEX idx_password_reset_expires (expires_at),
+  UNIQUE KEY uq_password_reset_token_hash (token_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS password_reset_audit (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_type VARCHAR(20) NOT NULL,
+  user_id INT NOT NULL,
+  username VARCHAR(120) NOT NULL,
+  email VARCHAR(190) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_password_reset_audit_created (created_at),
+  INDEX idx_password_reset_audit_user (user_type, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS client_supplier_profiles (
@@ -178,6 +238,55 @@ CREATE TABLE IF NOT EXISTS supplier_change_requests (
   CONSTRAINT fk_supplier_change_requests_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
   CONSTRAINT fk_supplier_change_requests_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
   CONSTRAINT fk_supplier_change_requests_user FOREIGN KEY (requested_by_user_id) REFERENCES client_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_supplier_creation_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_id INT NOT NULL,
+  requested_by_user_id INT NOT NULL,
+  name VARCHAR(190) NOT NULL,
+  supplier_type VARCHAR(120) NULL,
+  activity_text VARCHAR(255) NULL,
+  labels_text VARCHAR(255) NULL,
+  address VARCHAR(255) NULL,
+  city VARCHAR(120) NULL,
+  postal_code VARCHAR(30) NULL,
+  country VARCHAR(120) NULL,
+  phone VARCHAR(60) NULL,
+  email VARCHAR(190) NULL,
+  website VARCHAR(255) NULL,
+  notes TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  approved_supplier_id INT NULL,
+  reviewed_by_admin VARCHAR(120) NULL,
+  reviewed_at TIMESTAMP NULL,
+  review_note TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_client_supplier_creation_requests_client (client_id),
+  INDEX idx_client_supplier_creation_requests_status (status),
+  INDEX idx_client_supplier_creation_requests_approved_supplier (approved_supplier_id),
+  CONSTRAINT fk_client_supplier_creation_requests_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_client_supplier_creation_requests_user FOREIGN KEY (requested_by_user_id) REFERENCES client_users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_client_supplier_creation_requests_supplier FOREIGN KEY (approved_supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_supplier_link_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_id INT NOT NULL,
+  requested_by_user_id INT NOT NULL,
+  supplier_id INT NOT NULL,
+  note TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  reviewed_by_admin VARCHAR(120) NULL,
+  reviewed_at TIMESTAMP NULL,
+  review_note TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_client_supplier_link_requests_client (client_id),
+  INDEX idx_client_supplier_link_requests_supplier (supplier_id),
+  INDEX idx_client_supplier_link_requests_status (status),
+  CONSTRAINT fk_client_supplier_link_requests_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+  CONSTRAINT fk_client_supplier_link_requests_user FOREIGN KEY (requested_by_user_id) REFERENCES client_users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_client_supplier_link_requests_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS supplier_audit_log (

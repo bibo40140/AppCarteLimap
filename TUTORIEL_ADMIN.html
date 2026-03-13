@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tutoriel Espace Admin - Carte Limap</title>
+  <style>
+    :root {
+      --bg: #f3f4f8;
+      --paper: #fdfcff;
+      --ink: #1a1f2e;
+      --muted: #5a6070;
+      --brand: #2b4ea0;
+      --brand-2: #eaeefc;
+      --line: #d5daec;
+      --warn: #9c2f2f;
+      --green: #1f7a3f;
+      --green-2: #e6f3ea;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, #e8ecf9 0, transparent 40%),
+        radial-gradient(circle at 90% 100%, #e8f3ea 0, transparent 35%),
+        var(--bg);
+      line-height: 1.55;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    .hero {
+      background: linear-gradient(140deg, #2b4ea0 0%, #1a2f6a 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.14);
+    }
+
+    h1 { margin: 0 0 6px; font-size: 30px; }
+    .sub { margin: 0; opacity: .92; }
+
+    .card {
+      margin-top: 16px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      color: var(--brand);
+      font-size: 22px;
+    }
+
+    h3 {
+      margin: 16px 0 6px;
+      font-size: 17px;
+    }
+
+    p { margin: 8px 0; }
+
+    ul, ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li { margin: 6px 0; }
+
+    .tip {
+      background: var(--brand-2);
+      border-left: 4px solid var(--brand);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .tip-green {
+      background: var(--green-2);
+      border-left: 4px solid var(--green);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .warn {
+      background: #fdeeee;
+      border-left: 4px solid var(--warn);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+
+    .steps {
+      counter-reset: steps;
+      list-style: none;
+      margin: 8px 0 8px 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .steps li {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .steps li::before {
+      counter-increment: steps;
+      content: counter(steps);
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--brand);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .mini {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .mini h3 {
+      margin: 0 0 6px;
+      color: var(--brand);
+      font-size: 15px;
+    }
+
+    .mini p {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .badge-blue { background: var(--brand-2); color: var(--brand); }
+    .badge-green { background: var(--green-2); color: var(--green); }
+    .badge-red { background: #fdeeee; color: var(--warn); }
+    .badge-grey { background: #eee; color: #555; }
+
+    .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 14px;
+      word-break: break-all;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--brand-2);
+      color: var(--brand);
+      text-align: left;
+      padding: 8px 10px;
+    }
+
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .foot {
+      margin-top: 20px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      h1 { font-size: 25px; }
+      .grid, .grid-3 { grid-template-columns: 1fr; }
+      .hero { padding: 18px; }
+      .card { padding: 14px; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .hero { box-shadow: none; }
+      .card, .mini { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+
+    <section class="hero">
+      <h1>Tutoriel Espace Admin</h1>
+      <p class="sub">Carte Limap &mdash; Guide de gestion des donnees, des demandes clients et des utilisateurs.</p>
+    </section>
+
+    <!-- ===== 1. ACCES ===== -->
+    <section class="card">
+      <h2>1. Acces a l'espace admin</h2>
+      <p>Ouvrez la page suivante dans votre navigateur :</p>
+      <p class="mono">https://limap.fr/Carte/admin/index.html</p>
+      <ol class="steps">
+        <li><div><strong>Saisissez votre identifiant et votre mot de passe admin.</strong></div></li>
+        <li><div><strong>Cliquez sur Se connecter.</strong><br />Vous arrivez sur le tableau de bord avec tous les onglets de gestion.</div></li>
+      </ol>
+      <div class="tip">
+        Si vous etes deja connecte sur une autre session (client par exemple), commencez par vous deconnecter de cette session avant d'acceder a l'admin.
+      </div>
+    </section>
+
+    <!-- ===== 2. ONGLETS ===== -->
+    <section class="card">
+      <h2>2. Vue d'ensemble des onglets</h2>
+      <div class="grid">
+        <article class="mini">
+          <h3>Clients</h3>
+          <p>Creer et gerer les structures clientes (AMAP, circuits courts, etc.) et leurs logos.</p>
+        </article>
+        <article class="mini">
+          <h3>Categories / Labels / Types</h3>
+          <p>Administrer les referentiels : activites, labels bio/commerce equitable, types de fournisseurs.</p>
+        </article>
+        <article class="mini">
+          <h3>Fournisseurs</h3>
+          <p>Creer, modifier, affecter les fiches producteurs. Gerer les liens client-fournisseur.</p>
+        </article>
+        <article class="mini">
+          <h3>Utilisateurs</h3>
+          <p>Creer les comptes admin et clients, gerer les roles et les mots de passe.</p>
+        </article>
+        <article class="mini">
+          <h3>Demandes</h3>
+          <p>Traiter les demandes de modification, de creation et de rattachement fournisseur soumises par les clients.</p>
+        </article>
+        <article class="mini">
+          <h3>Import</h3>
+          <p>Importer massivement des fournisseurs depuis un fichier Excel.</p>
+        </article>
+        <article class="mini">
+          <h3>Parametres</h3>
+          <p>Configurer les URLs, les emails de notification, les assets et autres reglages globaux.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ===== 3. CLIENTS ===== -->
+    <section class="card">
+      <h2>3. Gestion des clients</h2>
+      <p>Un <strong>client</strong> est une structure adherente (AMAP, groupement d'achat, etc.) qui a acces a son propre espace.</p>
+
+      <h3>Creer un nouveau client</h3>
+      <ol class="steps">
+        <li><div><strong>Onglet Clients &rarr; remplissez le formulaire.</strong><br />Nom, type, adresse, email, site web, logo, description.</div></li>
+        <li><div><strong>Cliquez sur Enregistrer le client.</strong></div></li>
+        <li><div><strong>Creez ensuite au moins un compte utilisateur pour ce client.</strong><br />Onglet Utilisateurs &rarr; Nouvel utilisateur client (cf. section 7).</div></li>
+      </ol>
+
+      <h3>Lier un fournisseur a un client</h3>
+      <p>Une fois le client cree, son perimetre fournisseurs se construit de deux facons :</p>
+      <ul>
+        <li><strong>Manuellement en admin</strong> : onglet Fournisseurs, ouvrez une fiche fournisseur et cochez le client correspondant dans la liste des liens.</li>
+        <li><strong>Via une demande de rattachement client</strong> : le client en fait la demande depuis son espace, vous l'approuvez (cf. section 9).</li>
+      </ul>
+
+      <div class="tip">
+        Le logo du client doit etre uploade via le champ "Logo" du formulaire. Il sera automatiquement normalise et integre dans la carte publique.
+      </div>
+    </section>
+
+    <!-- ===== 4. REFERENTIELS ===== -->
+    <section class="card">
+      <h2>4. Gestion des referentiels (Categories, Labels, Types)</h2>
+      <p>Ces trois referentiels definissent les valeurs disponibles lors de la saisie d'un fournisseur.</p>
+
+      <table>
+        <thead>
+          <tr><th>Referentiel</th><th>Role</th><th>Exemple</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Categories</strong></td><td>Activites du fournisseur</td><td>Maraichage, Apiculture, Elevage bovin</td></tr>
+          <tr><td><strong>Labels</strong></td><td>Certifications et engagements</td><td>Bio AB, Nature et Progres, Commerce equitable</td></tr>
+          <tr><td><strong>Types</strong></td><td>Nature juridique du fournisseur</td><td>GAEC, EARL, SCEA, Artisan</td></tr>
+        </tbody>
+      </table>
+
+      <p>Pour ajouter ou modifier une valeur : ouvrez l'onglet correspondant, remplissez le formulaire et enregistrez. Les modifications sont immediatement disponibles dans tous les formulaires.</p>
+
+      <div class="warn">
+        Evitez de supprimer un referentiel utilise par des fournisseurs existants : cela peut retirer des donnees des fiches producteurs.
+      </div>
+    </section>
+
+    <!-- ===== 5. FOURNISSEURS ===== -->
+    <section class="card">
+      <h2>5. Gestion des fournisseurs</h2>
+      <p>Un <strong>fournisseur</strong> est une fiche producteur unique dans la base, potentiellement partagee entre plusieurs clients.</p>
+
+      <h3>Creer un fournisseur</h3>
+      <ol class="steps">
+        <li><div><strong>Onglet Fournisseurs &rarr; formulaire en bas "Nouveau fournisseur".</strong></div></li>
+        <li><div><strong>Renseignez au minimum le nom, la ville et le type.</strong><br />Completez avec adresse, coordonnees GPS, contact, activites, labels, site web, logo, description.</div></li>
+        <li><div><strong>Selectionnez le(s) client(s) auxquels rattacher ce fournisseur.</strong></div></li>
+        <li><div><strong>Enregistrez.</strong> La fiche est immediatement visible pour les clients selectionnes.</div></li>
+      </ol>
+
+      <h3>Modifier un fournisseur</h3>
+      <p>Cliquez sur le fournisseur dans la liste &rarr; le formulaire se pre-remplit &rarr; modifiez &rarr; Enregistrer. Les modifications sont repercutees sur la carte publique si le fournisseur est marque "public".</p>
+
+      <h3>Doublons et fiche globale</h3>
+      <div class="warn">
+        Avant de creer un nouveau fournisseur, verifiez qu'il n'existe pas deja (recherche par nom, ville, email). Une fiche dupliquee degrade la qualite des donnees de toute la plateforme.
+      </div>
+    </section>
+
+    <!-- ===== 6. IMPORT EXCEL ===== -->
+    <section class="card">
+      <h2>6. Import Excel massif</h2>
+      <p>L'onglet <strong>Import</strong> permet d'importer une grande quantite de fournisseurs depuis un fichier Excel, avec detection automatique des conflits.</p>
+
+      <ol class="steps">
+        <li><div><strong>Selectionnez le client cible</strong> dans la liste deroulante.</div></li>
+        <li><div><strong>Choisissez le fichier Excel</strong> (.xlsx) prepare selon le modele attendu.<br />Colonnes typiques : Nom, Adresse, Ville, Code postal, Tel, Email, Site web, Activites, Type, Labels.</div></li>
+        <li><div><strong>Cliquez sur Analyser.</strong><br />L'outil detecte les conflits potentiels (fournisseur deja existant portant un nom similaire).</div></li>
+        <li><div><strong>Verifiez les lignes en conflit</strong> et choisissez pour chacune : ignorer, fusionner ou creer quand meme.</div></li>
+        <li><div><strong>Lancez l'import.</strong></div></li>
+      </ol>
+
+      <div class="tip-green">
+        <strong>Nouveau client avec une base existante ?</strong><br />
+        Si un client vous envoie un fichier Excel avec sa liste de producteurs, c'est de loin la methode la plus efficace. Un seul import cree tous les fournisseurs et les rattache automatiquement au bon client. Conseillez toujours cette option plutot que la saisie manuelle ou les demandes de creation une par une.
+      </div>
+    </section>
+
+    <!-- ===== 7. UTILISATEURS ===== -->
+    <section class="card">
+      <h2>7. Gestion des utilisateurs</h2>
+
+      <h3>Roles disponibles</h3>
+      <table>
+        <thead>
+          <tr><th>Role</th><th>Perimetre</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="badge badge-red">admin</span></td><td>Acces complet a l'espace admin. A reserver aux administrateurs de la plateforme.</td></tr>
+          <tr><td><span class="badge badge-blue">client_manager</span></td><td>Acces client : peut tout faire dans son espace (modifier fiches, envoyer demandes).</td></tr>
+          <tr><td><span class="badge badge-blue">client_editor</span></td><td>Acces client limite : peut modifier les fiches mais pas supprimer ni gerer les utilisateurs.</td></tr>
+          <tr><td><span class="badge badge-grey">client_reader</span></td><td>Lecture seule dans l'espace client.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Creer un utilisateur client</h3>
+      <ol class="steps">
+        <li><div><strong>Onglet Utilisateurs &rarr; section "Nouvel utilisateur client".</strong></div></li>
+        <li><div><strong>Selectionnez le client</strong> auquel rattacher ce compte.</div></li>
+        <li><div><strong>Saisissez l'identifiant, l'email et le mot de passe provisoire.</strong></div></li>
+        <li><div><strong>Choisissez le role</strong> (client_manager en general pour le contact principal).</div></li>
+        <li><div><strong>Enregistrez.</strong> Communiquez l'URL et les identifiants au client.</div></li>
+      </ol>
+
+      <h3>Reinitialiser un mot de passe</h3>
+      <p>Deux options :</p>
+      <ul>
+        <li><strong>Par l'admin</strong> : onglet Utilisateurs &rarr; trouvez l'utilisateur &rarr; cliquez "Modifier le mot de passe".</li>
+        <li><strong>Par le client lui-meme</strong> : depuis la page de connexion &rarr; "Mot de passe oublie" &rarr; un lien est envoye par email.</li>
+      </ul>
+    </section>
+
+    <!-- ===== 8. DEMANDES DE MODIFICATION ===== -->
+    <section class="card">
+      <h2>8. Traiter les demandes de modification (champs globaux)</h2>
+      <p>Quand un client propose une correction sur la fiche globale d'un fournisseur (adresse, tel, email, activites...), une demande apparait dans l'onglet <strong>Demandes</strong>.</p>
+
+      <ol class="steps">
+        <li><div><strong>Onglet Demandes &rarr; section "Demandes de modification (champs globaux)".</strong></div></li>
+        <li><div><strong>Filtrez par statut ou par client si necessaire.</strong></div></li>
+        <li><div><strong>Pour chaque demande, comparez l'ancienne et la nouvelle valeur.</strong></div></li>
+        <li><div><strong>Approuver</strong> : la valeur est immediatement mise a jour sur la fiche fournisseur.</div></li>
+        <li><div><strong>Refuser</strong> : la valeur reste inchangee. Vous pouvez ajouter une note de refus.</div></li>
+      </ol>
+
+      <div class="tip">
+        Vous pouvez approuver ou refuser plusieurs demandes d'un coup avec les boutons "Approuver la selection" et "Refuser la selection".
+      </div>
+    </section>
+
+    <!-- ===== 9. DEMANDES DE CREATION ===== -->
+    <section class="card">
+      <h2>9. Traiter les demandes de creation de fournisseurs</h2>
+      <p>Un client peut proposer un nouveau fournisseur a ajouter dans la base.</p>
+
+      <ol class="steps">
+        <li><div><strong>Onglet Demandes &rarr; section "Demandes de creation de fournisseurs".</strong></div></li>
+        <li><div><strong>Consultez les informations saisies par le client.</strong><br />Nom, adresse, contact, activites, notes.</div></li>
+        <li><div><strong>Verifiez qu'il n'existe pas deja dans la base</strong> (recherchez dans l'onglet Fournisseurs).</div></li>
+        <li>
+          <div>
+            <strong>Si la demande est valide &rarr; Approuver.</strong><br />
+            Le fournisseur est cree automatiquement et lie au client demandeur. Vous pouvez ajuster ses informations ensuite dans l'onglet Fournisseurs.
+          </div>
+        </li>
+        <li><div><strong>Si doublon ou information insuffisante &rarr; Refuser</strong> avec une note explicative.<br />Le client verra le statut "Refusee" et votre note dans son historique.</div></li>
+      </ol>
+    </section>
+
+    <!-- ===== 10. DEMANDES DE RATTACHEMENT ===== -->
+    <section class="card">
+      <h2>10. Traiter les demandes de rattachement client-fournisseur</h2>
+      <p>Un client peut demander a ce qu'un fournisseur <em>deja existant dans la base</em> soit rattache a sa structure.</p>
+
+      <ol class="steps">
+        <li><div><strong>Onglet Demandes &rarr; section "Demandes de rattachement client-fournisseur".</strong></div></li>
+        <li><div><strong>Verifiez le client, le fournisseur concerne et la note eventuelle du client.</strong></div></li>
+        <li>
+          <div>
+            <strong>Approuver</strong> : le fournisseur est immediatement rattache au client. Il apparaitra dans son espace a la prochaine connexion.
+          </div>
+        </li>
+        <li><div><strong>Refuser</strong> : le fournisseur n'est pas rattache. Ajoutez une note si necessaire.</div></li>
+      </ol>
+
+      <div class="tip-green">
+        C'est la bonne procedure pour eviter les doublons : le client identifie lui-meme le fournisseur existant et en demande le rattachement, plutot que de recrer une fiche.
+      </div>
+    </section>
+
+    <!-- ===== 11. PARAMETRES ===== -->
+    <section class="card">
+      <h2>11. Parametres</h2>
+      <p>L'onglet <strong>Parametres</strong> regroupe les reglages globaux de la plateforme.</p>
+
+      <table>
+        <thead>
+          <tr><th>Parametre</th><th>Utilite</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>URL publique des assets</strong></td>
+            <td>Base URL du serveur (ex : <code>https://limap.fr/Carte</code>). Utilise pour construire les URLs completes des images et logos dans la carte publique.</td>
+          </tr>
+          <tr>
+            <td><strong>Emails de notification admin</strong></td>
+            <td>Adresses email qui recoivent les alertes lors de nouvelles demandes clients (modification, creation, rattachement). Separees par des virgules.</td>
+          </tr>
+          <tr>
+            <td><strong>Icone par defaut (client / producteur)</strong></td>
+            <td>Icone affichee sur la carte quand un client ou un producteur n'a pas de logo personnalise.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warn">
+        Apres avoir modifie les parametres, rechargez la carte publique avec Ctrl+F5 pour verifier que les assets s'affichent correctement.
+      </div>
+    </section>
+
+    <!-- ===== 12. EXPORT WORDPRESS ===== -->
+    <section class="card">
+      <h2>12. Export vers WordPress (procedure complete)</h2>
+
+      <ol class="steps">
+        <li>
+          <div>
+            <strong>Preparation avant export</strong><br />
+            Dans Parametres, verifiez :
+            <br />- URL publique des assets = <code>https://limap.fr/Carte</code>
+            <br />- logos/images de couverture visibles sur quelques fiches test
+            <br />- les donnees a publier sont bien marquees publiques
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Exporter depuis Limap</strong><br />
+            - Onglet Clients &rarr; <em>Exporter clients CSV</em>
+            <br />- Onglet Fournisseurs &rarr; <em>Exporter fournisseurs CSV</em> (pour un cycle complet)
+            <br />- Onglet Fournisseurs &rarr; <em>Exporter fournisseurs modifies</em> (pour une mise a jour incrementale)
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Aller dans WordPress</strong><br />
+            Ouvrir <strong>WP All Import &rarr; Manage Imports</strong>.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Choisir l'import preconfigure</strong><br />
+            Il y a 2 imports deja configures :
+            <br />- un import <strong>clients</strong>
+            <br />- un import <strong>fournisseurs</strong>
+            <br />Selectionnez celui qui correspond au fichier exporte.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Remplacer le fichier CSV</strong><br />
+            Dans l'import choisi : cliquez sur <strong>Settings</strong>, chargez le nouveau fichier CSV, validez.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Lancer l'import</strong><br />
+            Cliquez sur <strong>Run Import</strong> et attendez la fin complete du traitement.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Controle post-import</strong><br />
+            Verifiez rapidement :
+            <br />- pages clients/producteurs,
+            <br />- slugs,
+            <br />- images,
+            <br />- activites/labels,
+            <br />- dernieres fiches modifiees.
+          </div>
+        </li>
+      </ol>
+
+      <div class="tip">
+        Les CSV exportes par Limap sont en UTF-8 avec separateur point-virgule <code>;</code>. Si WP All Import detecte mal le format, forcez UTF-8 et le separateur <code>;</code>.
+      </div>
+    </section>
+
+    <!-- ===== 13. BONNES PRATIQUES ===== -->
+    <section class="card">
+      <h2>13. Bonnes pratiques admin</h2>
+      <ul>
+        <li><strong>Toujours chercher avant de creer</strong> : verifiez qu'un fournisseur ou un client n'existe pas deja avant toute creation.</li>
+        <li><strong>Traiter les demandes rapidement</strong> : les clients voient leur demande "En attente" et peuvent se decourager si aucun retour n'arrive.</li>
+        <li><strong>Ajouter une note en cas de refus</strong> : une note claire aide le client a comprendre pourquoi sa demande a ete refusee et a soumettre une correction.</li>
+        <li><strong>Ne pas partager le compte admin</strong> : chaque administrateur doit avoir son propre compte pour maintenir une traçabilite.</li>
+        <li><strong>Sauvegarder regulierement</strong> : exportez ou sauvegardez la base de donnees avant toute operation massive (import Excel, suppressions en lot).</li>
+        <li><strong>Verifier les emails de notification</strong> : tester la notification depuis Parametres &rarr; bouton "Envoyer un email de test".</li>
+      </ul>
+    </section>
+
+    <!-- ===== 14. SUPPORT ===== -->
+    <section class="card">
+      <h2>14. En cas de probleme</h2>
+      <ul>
+        <li><strong>Erreur apres une action</strong> : ouvrir la console du navigateur (F12 &rarr; Console) et noter le message d'erreur.</li>
+        <li><strong>Page vide ou donnees manquantes</strong> : recharger avec Ctrl+F5. Si le probleme persiste, verifier les parametres et la connexion au serveur.</li>
+        <li><strong>Import Excel bloque</strong> : verifier que le fichier est bien au format .xlsx et que les colonnes correspondent au modele attendu.</li>
+        <li><strong>Email de notification non recu</strong> : tester depuis Parametres, puis verifier le dossier Spam et la configuration SMTP/mail du serveur OVH.</li>
+      </ul>
+    </section>
+
+    <p class="foot">Document administrateur &mdash; Carte Limap</p>
+  </main>
+</body>
+</html>

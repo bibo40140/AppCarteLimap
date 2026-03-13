@@ -14,7 +14,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
-$pdo = get_db();
+$diagEnabled = isset($_GET['diag']) && (string)$_GET['diag'] === '1';
+
+try {
+    $pdo = get_db();
+} catch (Throwable $e) {
+    error_log('AppCarte API bootstrap failure: ' . $e->getMessage());
+    $payload = ['ok' => false, 'error' => 'Internal server error'];
+    if ($diagEnabled) {
+        $payload['detail'] = $e->getMessage();
+    }
+    json_response($payload, 500);
+}
 
 try {
     switch ($action) {
@@ -36,6 +47,20 @@ try {
             auth_me();
             break;
 
+        case 'auth/password-reset/request':
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Methode invalide'], 405);
+            }
+            request_password_reset($pdo);
+            break;
+
+        case 'auth/password-reset/confirm':
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Methode invalide'], 405);
+            }
+            confirm_password_reset($pdo);
+            break;
+
         case 'admin/bootstrap':
             require_admin();
             admin_bootstrap($pdo);
@@ -47,6 +72,24 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             save_client($pdo);
+            break;
+
+        case 'admin/client/export':
+            require_admin();
+            export_clients_csv($pdo);
+            break;
+
+        case 'admin/client/delete':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            delete_client($pdo);
+            break;
+
+        case 'admin/producer/export':
+            require_admin();
+            export_producers_csv($pdo);
             break;
 
         case 'admin/client-user/save':
@@ -73,6 +116,46 @@ try {
             reset_client_user_password($pdo);
             break;
 
+        case 'admin/client-user/send-reset-link':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Methode invalide'], 405);
+            }
+            admin_send_client_user_reset_link($pdo);
+            break;
+
+        case 'admin/admin-user/save':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            save_admin_user($pdo);
+            break;
+
+        case 'admin/admin-user/toggle-active':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            toggle_admin_user_active($pdo);
+            break;
+
+        case 'admin/admin-user/reset-password':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            reset_admin_user_password($pdo);
+            break;
+
+        case 'admin/admin-user/send-reset-link':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Methode invalide'], 405);
+            }
+            admin_send_admin_user_reset_link($pdo);
+            break;
+
         case 'admin/upload/client-logo':
             require_admin();
             if ($method !== 'POST') {
@@ -95,6 +178,14 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             save_settings($pdo);
+            break;
+
+        case 'admin/notification/test':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            send_test_notification($pdo);
             break;
 
         case 'admin/geocode':
@@ -190,12 +281,67 @@ try {
             client_bootstrap($pdo);
             break;
 
+        case 'client/upload/client-logo':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            upload_client_logo();
+            break;
+
+        case 'client/geocode':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            geocode_address_client();
+            break;
+
+        case 'client/profile/save':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            save_client_profile($pdo);
+            break;
+
         case 'client/supplier/profile/save':
             require_client_or_admin();
             if ($method !== 'POST') {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             save_client_supplier_profile($pdo);
+            break;
+
+        case 'client/supplier-create-request/save':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            save_supplier_creation_request($pdo);
+            break;
+
+        case 'client/supplier-create-request/list':
+            require_client_or_admin();
+            list_supplier_creation_requests_for_client($pdo);
+            break;
+
+        case 'client/supplier-link-search':
+            require_client_or_admin();
+            search_supplier_link_candidates_for_client($pdo);
+            break;
+
+        case 'client/supplier-link-request/save':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            save_supplier_link_request($pdo);
+            break;
+
+        case 'client/supplier-link-request/list':
+            require_client_or_admin();
+            list_supplier_link_requests_for_client($pdo);
             break;
 
         case 'client/change-request/save':
@@ -216,6 +362,16 @@ try {
             list_supplier_change_requests_for_admin($pdo);
             break;
 
+        case 'admin/supplier-create-request/list':
+            require_admin();
+            list_supplier_creation_requests_for_admin($pdo);
+            break;
+
+        case 'admin/supplier-link-request/list':
+            require_admin();
+            list_supplier_link_requests_for_admin($pdo);
+            break;
+
         case 'admin/change-request/review':
             require_admin();
             if ($method !== 'POST') {
@@ -230,6 +386,22 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             review_supplier_change_requests_bulk($pdo);
+            break;
+
+        case 'admin/supplier-create-request/review':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            review_supplier_creation_request($pdo);
+            break;
+
+        case 'admin/supplier-link-request/review':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            review_supplier_link_request($pdo);
             break;
 
         case 'map-data':
@@ -254,12 +426,31 @@ function login(PDO $pdo): void
     }
 
     $config = require __DIR__ . '/config.php';
-    if ($username === $config['admin']['username'] && $password === $config['admin']['password']) {
+    $adminUsername = (string)($config['admin']['username'] ?? 'admin');
+    $adminPasswordHash = (string)($config['admin']['password_hash'] ?? '');
+    $adminMatches = false;
+
+    $stmtAdmin = $pdo->prepare('SELECT id, username, password_hash, is_active FROM admin_users WHERE username=:username LIMIT 1');
+    $stmtAdmin->execute([':username' => $username]);
+    $adminRow = $stmtAdmin->fetch();
+    if ($adminRow && (int)($adminRow['is_active'] ?? 0) === 1) {
+        $adminMatches = password_verify($password, (string)($adminRow['password_hash'] ?? ''));
+    }
+
+    if ($username === $adminUsername) {
+        $adminMatches = $adminMatches || ($adminPasswordHash !== '' && password_verify($password, $adminPasswordHash));
+    }
+
+    if ($adminMatches) {
         start_app_session();
         $_SESSION['is_admin'] = true;
-        $_SESSION['admin_username'] = $username;
+        $_SESSION['admin_user_id'] = $adminRow ? (int)($adminRow['id'] ?? 0) : null;
+        $_SESSION['admin_username'] = $adminRow ? (string)($adminRow['username'] ?? $username) : $username;
         unset($_SESSION['is_client_user'], $_SESSION['client_user_id'], $_SESSION['client_id'], $_SESSION['client_role']);
-        json_response(['ok' => true, 'username' => $username, 'role' => 'admin']);
+        if ($adminRow) {
+            $pdo->prepare('UPDATE admin_users SET last_login_at=NOW() WHERE id=:id')->execute([':id' => (int)$adminRow['id']]);
+        }
+        json_response(['ok' => true, 'username' => (string)($_SESSION['admin_username'] ?? $username), 'role' => 'admin']);
     }
 
     $stmt = $pdo->prepare('SELECT cu.id, cu.client_id, cu.username, cu.password_hash, cu.role, cu.is_active, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id WHERE cu.username=:username LIMIT 1');
@@ -280,7 +471,7 @@ function login(PDO $pdo): void
     $_SESSION['client_role'] = (string)$row['role'];
     $_SESSION['client_username'] = (string)$row['username'];
     $_SESSION['client_name'] = (string)$row['client_name'];
-    unset($_SESSION['admin_username']);
+    unset($_SESSION['admin_username'], $_SESSION['admin_user_id']);
 
     json_response([
         'ok' => true,
@@ -310,6 +501,7 @@ function auth_me(): void
         'ok' => true,
         'is_admin' => !empty($_SESSION['is_admin']),
         'username' => $_SESSION['admin_username'] ?? null,
+        'admin_user_id' => isset($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : null,
         'is_client_user' => !empty($_SESSION['is_client_user']),
         'client_user_id' => isset($_SESSION['client_user_id']) ? (int)$_SESSION['client_user_id'] : null,
         'client_id' => isset($_SESSION['client_id']) ? (int)$_SESSION['client_id'] : null,
@@ -321,8 +513,10 @@ function auth_me(): void
 
 function admin_bootstrap(PDO $pdo): void
 {
-    $clients = $pdo->query('SELECT * FROM clients ORDER BY name')->fetchAll();
-    $clientUsers = $pdo->query('SELECT cu.id, cu.client_id, cu.username, cu.role, cu.is_active, cu.last_login_at, cu.created_at, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id ORDER BY c.name, cu.username')->fetchAll();
+    $clients = $pdo->query('SELECT * FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
+    $clientUsers = $pdo->query('SELECT cu.id, cu.client_id, cu.username, cu.email, cu.role, cu.is_active, cu.last_login_at, cu.created_at, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id ORDER BY c.name, cu.username')->fetchAll();
+    $adminUsers = $pdo->query('SELECT id, username, email, is_active, last_login_at, created_at FROM admin_users ORDER BY username')->fetchAll();
+    $resetAudit = $pdo->query('SELECT id, user_type, user_id, username, email, status, error_message, created_at FROM password_reset_audit ORDER BY id DESC LIMIT 30')->fetchAll();
     $activities = $pdo->query('SELECT * FROM activities ORDER BY family, name')->fetchAll();
     $labels = $pdo->query('SELECT * FROM labels ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT * FROM supplier_types ORDER BY name')->fetchAll();
@@ -350,15 +544,24 @@ function admin_bootstrap(PDO $pdo): void
          ORDER BY s.name"
     )->fetchAll();
 
-    $clients = array_map(function (array $client) {
+    $clients = array_map(function (array $client) use ($pdo) {
         $client['phone'] = format_phone($client['phone'] ?? '');
+        $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
+        $client['photo_cover_url'] = absolutize_export_url($pdo, (string)($client['photo_cover_url'] ?? ''));
         return $client;
     }, $clients);
 
-    $suppliers = array_map(function (array $supplier) {
+    $suppliers = array_map(function (array $supplier) use ($pdo) {
         $supplier['phone'] = format_phone($supplier['phone'] ?? '');
+        $supplier['logo_url'] = absolutize_export_url($pdo, (string)($supplier['logo_url'] ?? ''));
+        $supplier['photo_cover_url'] = absolutize_export_url($pdo, (string)($supplier['photo_cover_url'] ?? ''));
         return $supplier;
     }, $suppliers);
+
+    $activities = array_map(function (array $activity) use ($pdo) {
+        $activity['icon_url'] = absolutize_export_url($pdo, (string)($activity['icon_url'] ?? ''));
+        return $activity;
+    }, $activities);
 
     $settingsRows = $pdo->query('SELECT setting_key, setting_value FROM settings')->fetchAll();
     $settings = [];
@@ -366,15 +569,20 @@ function admin_bootstrap(PDO $pdo): void
         $settings[$row['setting_key']] = $row['setting_value'];
     }
 
+    $linkRequestPending = (int)$pdo->query('SELECT COUNT(*) FROM client_supplier_link_requests WHERE status="pending"')->fetchColumn();
+
     json_response([
         'ok' => true,
         'clients' => $clients,
         'client_users' => $clientUsers,
+        'admin_users' => $adminUsers,
         'activities' => $activities,
         'labels' => $labels,
         'supplier_types' => $supplierTypes,
         'suppliers' => $suppliers,
         'settings' => $settings,
+        'password_reset_audit' => $resetAudit,
+        'supplier_link_request_pending_count' => $linkRequestPending,
     ]);
 }
 
@@ -406,7 +614,16 @@ function save_client(PDO $pdo): void
         ':samedi' => array_key_exists('samedi', $input) ? trim((string)$input['samedi']) : null,
         ':dimanche' => array_key_exists('dimanche', $input) ? trim((string)$input['dimanche']) : null,
         ':website' => trim((string)($input['website'] ?? '')),
+        ':facebook_url' => trim((string)($input['facebook_url'] ?? '')),
+        ':instagram_url' => trim((string)($input['instagram_url'] ?? '')),
+        ':linkedin_url' => trim((string)($input['linkedin_url'] ?? '')),
         ':logo_url' => trim((string)($input['logo_url'] ?? '')),
+        ':photo_cover_url' => trim((string)($input['photo_cover_url'] ?? '')),
+        ':slug' => slugify_text((string)($input['slug'] ?? $name)),
+        ':description_short' => trim((string)($input['description_short'] ?? '')),
+        ':description_long' => trim((string)($input['description_long'] ?? '')),
+        ':is_public' => !empty($input['is_public']) ? 1 : 0,
+        ':public_updated_at' => date('Y-m-d H:i:s'),
         ':is_active' => !empty($input['is_active']) ? 1 : 0,
     ];
 
@@ -418,18 +635,158 @@ function save_client(PDO $pdo): void
             lundi=COALESCE(:lundi, lundi), mardi=COALESCE(:mardi, mardi), mercredi=COALESCE(:mercredi, mercredi),
             jeudi=COALESCE(:jeudi, jeudi), vendredi=COALESCE(:vendredi, vendredi),
             samedi=COALESCE(:samedi, samedi), dimanche=COALESCE(:dimanche, dimanche),
-            website=:website, logo_url=:logo_url, is_active=:is_active
+            website=:website, facebook_url=:facebook_url, instagram_url=:instagram_url, linkedin_url=:linkedin_url,
+            logo_url=:logo_url, photo_cover_url=:photo_cover_url, slug=:slug,
+            description_short=:description_short, description_long=:description_long,
+            is_public=:is_public, public_updated_at=:public_updated_at, is_active=:is_active
             WHERE id=:id";
         $pdo->prepare($sql)->execute($payload);
     } else {
         $sql = "INSERT INTO clients
-            (name, client_type, address, city, postal_code, country, latitude, longitude, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website, logo_url, is_active)
+            (name, client_type, address, city, postal_code, country, latitude, longitude, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website, facebook_url, instagram_url, linkedin_url, logo_url, photo_cover_url, slug, description_short, description_long, is_public, public_updated_at, is_active)
             VALUES
-            (:name, :client_type, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :lundi, :mardi, :mercredi, :jeudi, :vendredi, :samedi, :dimanche, :website, :logo_url, :is_active)";
+            (:name, :client_type, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :lundi, :mardi, :mercredi, :jeudi, :vendredi, :samedi, :dimanche, :website, :facebook_url, :instagram_url, :linkedin_url, :logo_url, :photo_cover_url, :slug, :description_short, :description_long, :is_public, :public_updated_at, :is_active)";
         $pdo->prepare($sql)->execute($payload);
     }
 
     json_response(['ok' => true]);
+}
+
+function delete_client(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'ID client invalide'], 422);
+    }
+    $pdo->prepare('UPDATE clients SET is_active=0 WHERE id=:id')->execute([':id' => $id]);
+    json_response(['ok' => true]);
+}
+
+function export_clients_csv(PDO $pdo): void
+{
+    $rows = $pdo->query('SELECT id, name, slug, client_type, description_short, description_long, address, city, postal_code, country, latitude, longitude, phone, email, website, facebook_url, instagram_url, linkedin_url, logo_url, photo_cover_url, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, is_public, public_updated_at, updated_at FROM clients WHERE is_active=1 AND is_public=1 ORDER BY name')->fetchAll();
+
+    $rows = array_map(function (array $row) use ($pdo) {
+        $row['id_source'] = (int)$row['id'];
+        unset($row['id']);
+        $row['logo_url'] = absolutize_export_url($pdo, (string)($row['logo_url'] ?? ''));
+        $row['photo_cover_url'] = absolutize_export_url($pdo, (string)($row['photo_cover_url'] ?? ''));
+        // WordPress-ready aliases to map directly to post fields.
+        $row['wp_post_title'] = (string)($row['name'] ?? '');
+        $row['wp_post_name'] = (string)($row['slug'] ?? '');
+        $row['wp_post_excerpt'] = (string)($row['description_short'] ?? '');
+        $row['wp_post_content'] = (string)($row['description_long'] ?? '');
+        return $row;
+    }, $rows);
+
+    $headers = [
+        'wp_post_title', 'wp_post_name', 'wp_post_excerpt', 'wp_post_content',
+        'id_source', 'name', 'slug', 'client_type', 'description_short', 'description_long',
+        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude',
+        'phone', 'email', 'website', 'facebook_url', 'instagram_url', 'linkedin_url',
+        'logo_url', 'photo_cover_url', 'lundi', 'mardi', 'mercredi', 'jeudi',
+        'vendredi', 'samedi', 'dimanche', 'is_public', 'public_updated_at', 'updated_at'
+    ];
+
+    csv_response($headers, $rows, 'clients-wordpress-' . date('Ymd-His') . '.csv');
+}
+
+function export_producers_csv(PDO $pdo): void
+{
+    $scope = trim((string)($_GET['scope'] ?? 'all'));
+    $lastExportedAt = trim((string)get_setting_value($pdo, 'producer_export_last_at', ''));
+    $where = [
+        's.is_public=1',
+    ];
+    $params = [];
+
+    if ($scope === 'changed' && $lastExportedAt !== '') {
+        $where[] = 'COALESCE(s.public_updated_at, s.updated_at) >= :since';
+        $params[':since'] = $lastExportedAt;
+    }
+
+    $sql = "SELECT
+                s.id,
+                s.name,
+                s.slug,
+                s.supplier_type,
+                s.description_short,
+                s.description_long,
+                s.address,
+                s.city,
+                s.postal_code,
+                s.country,
+                s.latitude,
+                s.longitude,
+                s.phone,
+                s.email,
+                s.website,
+                s.facebook_url,
+                s.instagram_url,
+                s.linkedin_url,
+                s.logo_url,
+                s.photo_cover_url,
+                s.activity_text,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT a.name ORDER BY a.name SEPARATOR '; ')
+                    FROM supplier_activities sa
+                    JOIN activities a ON a.id = sa.activity_id
+                    WHERE sa.supplier_id = s.id
+                ) AS activity_names,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT a.icon_url ORDER BY a.name SEPARATOR '; ')
+                    FROM supplier_activities sa
+                    JOIN activities a ON a.id = sa.activity_id
+                    WHERE sa.supplier_id = s.id AND TRIM(COALESCE(a.icon_url, '')) <> ''
+                ) AS activity_icons,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT l.name ORDER BY l.name SEPARATOR '; ')
+                    FROM supplier_labels sl
+                    JOIN labels l ON l.id = sl.label_id
+                    WHERE sl.supplier_id = s.id
+                ) AS labels,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR '; ')
+                    FROM client_suppliers cs
+                    JOIN clients c ON c.id = cs.client_id
+                    WHERE cs.supplier_id = s.id
+                ) AS client_names,
+                s.is_public,
+                s.public_updated_at,
+                s.updated_at
+            FROM suppliers s
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY s.name";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$row) {
+        $row['logo_url'] = absolutize_export_url($pdo, (string)($row['logo_url'] ?? ''));
+        $row['photo_cover_url'] = absolutize_export_url($pdo, (string)($row['photo_cover_url'] ?? ''));
+        $row['activity_icons'] = absolutize_export_url_list($pdo, (string)($row['activity_icons'] ?? ''));
+    }
+    unset($row);
+
+    $rows = array_map(function (array $row) {
+        $row['id_source'] = (int)$row['id'];
+        unset($row['id']);
+        return $row;
+    }, $rows);
+
+    $headers = [
+        'id_source', 'name', 'slug', 'supplier_type', 'description_short', 'description_long',
+        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude',
+        'phone', 'email', 'website', 'facebook_url', 'instagram_url', 'linkedin_url',
+        'logo_url', 'photo_cover_url', 'activity_text', 'activity_names', 'activity_icons', 'labels', 'client_names',
+        'is_public', 'public_updated_at', 'updated_at'
+    ];
+
+    set_setting_value($pdo, 'producer_export_last_at', date('Y-m-d H:i:s'));
+    $suffix = $scope === 'changed' ? 'changed' : 'all';
+    csv_response($headers, $rows, 'fournisseurs-wordpress-' . $suffix . '-' . date('Ymd-His') . '.csv');
 }
 
 function save_client_user(PDO $pdo): void
@@ -438,6 +795,7 @@ function save_client_user(PDO $pdo): void
     $id = isset($input['id']) ? (int)$input['id'] : 0;
     $clientId = isset($input['client_id']) ? (int)$input['client_id'] : 0;
     $username = trim((string)($input['username'] ?? ''));
+    $email = sanitize_email_or_fail((string)($input['email'] ?? ''), 'Email utilisateur client invalide');
     $password = (string)($input['password'] ?? '');
     $role = trim((string)($input['role'] ?? 'client_manager'));
     $isActive = !empty($input['is_active']) ? 1 : 0;
@@ -447,6 +805,9 @@ function save_client_user(PDO $pdo): void
     }
     if ($username === '') {
         json_response(['ok' => false, 'error' => 'Nom utilisateur requis'], 422);
+    }
+    if ($email === '') {
+        json_response(['ok' => false, 'error' => 'Email utilisateur client requis'], 422);
     }
 
     $allowedRoles = ['client_manager', 'client_editor', 'client_reader'];
@@ -459,11 +820,12 @@ function save_client_user(PDO $pdo): void
             ':id' => $id,
             ':client_id' => $clientId,
             ':username' => $username,
+            ':email' => $email,
             ':role' => $role,
             ':is_active' => $isActive,
         ];
 
-        $sql = 'UPDATE client_users SET client_id=:client_id, username=:username, role=:role, is_active=:is_active';
+        $sql = 'UPDATE client_users SET client_id=:client_id, username=:username, email=:email, role=:role, is_active=:is_active';
         if ($password !== '') {
             if (mb_strlen($password, 'UTF-8') < 8) {
                 json_response(['ok' => false, 'error' => 'Mot de passe trop court (8 caractères min)'], 422);
@@ -489,10 +851,11 @@ function save_client_user(PDO $pdo): void
     }
 
     try {
-        $pdo->prepare('INSERT INTO client_users (client_id, username, password_hash, role, is_active) VALUES (:client_id, :username, :password_hash, :role, :is_active)')
+        $pdo->prepare('INSERT INTO client_users (client_id, username, email, password_hash, role, is_active) VALUES (:client_id, :username, :email, :password_hash, :role, :is_active)')
             ->execute([
                 ':client_id' => $clientId,
                 ':username' => $username,
+                ':email' => $email,
                 ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
                 ':role' => $role,
                 ':is_active' => $isActive,
@@ -546,10 +909,395 @@ function reset_client_user_password(PDO $pdo): void
     json_response(['ok' => true]);
 }
 
+function save_admin_user(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    $username = trim((string)($input['username'] ?? ''));
+    $email = sanitize_email_or_fail((string)($input['email'] ?? ''), 'Email admin invalide');
+    $password = (string)($input['password'] ?? '');
+    $isActive = !empty($input['is_active']) ? 1 : 0;
+
+    if ($username === '') {
+        json_response(['ok' => false, 'error' => 'Nom utilisateur admin requis'], 422);
+    }
+    if ($email === '') {
+        json_response(['ok' => false, 'error' => 'Email admin requis'], 422);
+    }
+
+    if ($id > 0) {
+        $payload = [
+            ':id' => $id,
+            ':username' => $username,
+            ':email' => $email,
+            ':is_active' => $isActive,
+        ];
+
+        $sql = 'UPDATE admin_users SET username=:username, email=:email, is_active=:is_active';
+        if ($password !== '') {
+            $error = validate_password_strength($password, 12);
+            if ($error !== null) {
+                json_response(['ok' => false, 'error' => $error], 422);
+            }
+            $sql .= ', password_hash=:password_hash';
+            $payload[':password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+        }
+        $sql .= ' WHERE id=:id';
+
+        try {
+            $pdo->prepare($sql)->execute($payload);
+        } catch (PDOException $e) {
+            if (($e->getCode() ?? '') === '23000') {
+                json_response(['ok' => false, 'error' => 'Nom utilisateur admin déjà utilisé'], 422);
+            }
+            throw $e;
+        }
+
+        json_response(['ok' => true]);
+    }
+
+    $error = validate_password_strength($password, 12);
+    if ($error !== null) {
+        json_response(['ok' => false, 'error' => $error], 422);
+    }
+
+    try {
+        $pdo->prepare('INSERT INTO admin_users (username, email, password_hash, is_active) VALUES (:username, :email, :password_hash, :is_active)')
+            ->execute([
+                ':username' => $username,
+                ':email' => $email,
+                ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                ':is_active' => $isActive,
+            ]);
+    } catch (PDOException $e) {
+        if (($e->getCode() ?? '') === '23000') {
+            json_response(['ok' => false, 'error' => 'Nom utilisateur admin déjà utilisé'], 422);
+        }
+        throw $e;
+    }
+
+    json_response(['ok' => true]);
+}
+
+function toggle_admin_user_active(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    $isActive = !empty($input['is_active']) ? 1 : 0;
+
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Admin invalide'], 422);
+    }
+
+    start_app_session();
+    $currentAdminId = isset($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : 0;
+    if ($isActive === 0 && $currentAdminId > 0 && $currentAdminId === $id) {
+        json_response(['ok' => false, 'error' => 'Impossible de désactiver ton propre compte admin'], 422);
+    }
+
+    if ($isActive === 0) {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM admin_users WHERE is_active=1 AND id<>:id');
+        $stmt->execute([':id' => $id]);
+        $remaining = (int)$stmt->fetchColumn();
+        $hasEnvAdmin = has_env_admin_hash();
+        if ($remaining <= 0 && !$hasEnvAdmin) {
+            json_response(['ok' => false, 'error' => 'Au moins un admin actif est requis'], 422);
+        }
+    }
+
+    $pdo->prepare('UPDATE admin_users SET is_active=:is_active WHERE id=:id')->execute([
+        ':is_active' => $isActive,
+        ':id' => $id,
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function reset_admin_user_password(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    $newPassword = (string)($input['new_password'] ?? '');
+
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Admin invalide'], 422);
+    }
+
+    $error = validate_password_strength($newPassword, 12);
+    if ($error !== null) {
+        json_response(['ok' => false, 'error' => $error], 422);
+    }
+
+    $pdo->prepare('UPDATE admin_users SET password_hash=:password_hash WHERE id=:id')->execute([
+        ':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
+        ':id' => $id,
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function validate_password_strength(string $password, int $minLength = 12): ?string
+{
+    if (mb_strlen($password, 'UTF-8') < $minLength) {
+        return 'Mot de passe trop court (' . $minLength . ' caractères min)';
+    }
+
+    $score = 0;
+    $score += preg_match('/[a-z]/', $password) ? 1 : 0;
+    $score += preg_match('/[A-Z]/', $password) ? 1 : 0;
+    $score += preg_match('/\d/', $password) ? 1 : 0;
+    $score += preg_match('/[^a-zA-Z\d]/', $password) ? 1 : 0;
+
+    if ($score < 3) {
+        return 'Mot de passe trop faible (utilise majuscules, minuscules, chiffres et/ou symboles)';
+    }
+
+    return null;
+}
+
+function has_env_admin_hash(): bool
+{
+    $config = require __DIR__ . '/config.php';
+    return trim((string)($config['admin']['password_hash'] ?? '')) !== '';
+}
+
+function sanitize_email_or_fail(string $email, string $invalidMessage): string
+{
+    $email = trim($email);
+    if ($email === '') {
+        return '';
+    }
+    $valid = filter_var($email, FILTER_VALIDATE_EMAIL);
+    if ($valid === false) {
+        json_response(['ok' => false, 'error' => $invalidMessage], 422);
+    }
+    return mb_strtolower((string)$valid, 'UTF-8');
+}
+
+function request_password_reset(PDO $pdo): void
+{
+    $input = get_json_input();
+    $email = sanitize_email_or_fail((string)($input['email'] ?? ''), 'Email invalide');
+    if ($email === '') {
+        json_response(['ok' => false, 'error' => 'Email requis'], 422);
+    }
+
+    $user = find_user_for_password_reset($pdo, $email);
+    if ($user) {
+        issue_password_reset_link($pdo, $user['user_type'], (int)$user['id'], (string)$user['email'], (string)$user['username']);
+    }
+
+    // Always return success to avoid account enumeration.
+    json_response(['ok' => true]);
+}
+
+function confirm_password_reset(PDO $pdo): void
+{
+    $input = get_json_input();
+    $token = trim((string)($input['token'] ?? ''));
+    $newPassword = (string)($input['new_password'] ?? '');
+
+    if ($token === '') {
+        json_response(['ok' => false, 'error' => 'Token invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, user_type, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash=:token_hash LIMIT 1');
+    $stmt->execute([':token_hash' => hash('sha256', $token)]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_response(['ok' => false, 'error' => 'Lien invalide ou expire'], 422);
+    }
+    if (!empty($row['used_at'])) {
+        json_response(['ok' => false, 'error' => 'Lien deja utilise'], 422);
+    }
+    if (strtotime((string)$row['expires_at']) < time()) {
+        json_response(['ok' => false, 'error' => 'Lien expire'], 422);
+    }
+
+    $userType = (string)$row['user_type'];
+    if ($userType === 'admin') {
+        $error = validate_password_strength($newPassword, 12);
+        if ($error !== null) {
+            json_response(['ok' => false, 'error' => $error], 422);
+        }
+        $pdo->prepare('UPDATE admin_users SET password_hash=:password_hash WHERE id=:id')
+            ->execute([':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT), ':id' => (int)$row['user_id']]);
+    } elseif ($userType === 'client') {
+        if ($newPassword === '' || mb_strlen($newPassword, 'UTF-8') < 8) {
+            json_response(['ok' => false, 'error' => 'Mot de passe trop court (8 caracteres min)'], 422);
+        }
+        $pdo->prepare('UPDATE client_users SET password_hash=:password_hash WHERE id=:id')
+            ->execute([':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT), ':id' => (int)$row['user_id']]);
+    } else {
+        json_response(['ok' => false, 'error' => 'Type utilisateur invalide'], 422);
+    }
+
+    $pdo->prepare('UPDATE password_reset_tokens SET used_at=NOW() WHERE id=:id')->execute([':id' => (int)$row['id']]);
+    json_response(['ok' => true]);
+}
+
+function admin_send_client_user_reset_link(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Utilisateur invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, username, email, is_active FROM client_users WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row || (int)($row['is_active'] ?? 0) !== 1) {
+        json_response(['ok' => false, 'error' => 'Utilisateur client introuvable ou inactif'], 422);
+    }
+    $email = sanitize_email_or_fail((string)($row['email'] ?? ''), 'Email utilisateur client invalide');
+    if ($email === '') {
+        json_response(['ok' => false, 'error' => 'Email utilisateur client requis'], 422);
+    }
+
+    issue_password_reset_link($pdo, 'client', (int)$row['id'], $email, (string)$row['username']);
+    json_response(['ok' => true]);
+}
+
+function admin_send_admin_user_reset_link(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Admin invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, username, email, is_active FROM admin_users WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row || (int)($row['is_active'] ?? 0) !== 1) {
+        json_response(['ok' => false, 'error' => 'Admin introuvable ou inactif'], 422);
+    }
+    $email = sanitize_email_or_fail((string)($row['email'] ?? ''), 'Email admin invalide');
+    if ($email === '') {
+        json_response(['ok' => false, 'error' => 'Email admin requis'], 422);
+    }
+
+    issue_password_reset_link($pdo, 'admin', (int)$row['id'], $email, (string)$row['username']);
+    json_response(['ok' => true]);
+}
+
+function find_user_for_password_reset(PDO $pdo, string $email): ?array
+{
+    $stmtClient = $pdo->prepare('SELECT id, username, email FROM client_users WHERE is_active=1 AND LOWER(email)=:email ORDER BY id DESC LIMIT 1');
+    $stmtClient->execute([':email' => mb_strtolower($email, 'UTF-8')]);
+    $client = $stmtClient->fetch();
+    if ($client) {
+        return [
+            'user_type' => 'client',
+            'id' => (int)$client['id'],
+            'username' => (string)$client['username'],
+            'email' => (string)$client['email'],
+        ];
+    }
+
+    $stmtAdmin = $pdo->prepare('SELECT id, username, email FROM admin_users WHERE is_active=1 AND LOWER(email)=:email ORDER BY id DESC LIMIT 1');
+    $stmtAdmin->execute([':email' => mb_strtolower($email, 'UTF-8')]);
+    $admin = $stmtAdmin->fetch();
+    if ($admin) {
+        return [
+            'user_type' => 'admin',
+            'id' => (int)$admin['id'],
+            'username' => (string)$admin['username'],
+            'email' => (string)$admin['email'],
+        ];
+    }
+
+    return null;
+}
+
+function issue_password_reset_link(PDO $pdo, string $userType, int $userId, string $email, string $username): void
+{
+    $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    $tokenHash = hash('sha256', $token);
+    $expiresAt = date('Y-m-d H:i:s', time() + 2 * 3600);
+
+    $pdo->prepare('UPDATE password_reset_tokens SET used_at=NOW() WHERE user_type=:user_type AND user_id=:user_id AND used_at IS NULL')
+        ->execute([':user_type' => $userType, ':user_id' => $userId]);
+
+    $pdo->prepare('INSERT INTO password_reset_tokens (user_type, user_id, token_hash, expires_at) VALUES (:user_type, :user_id, :token_hash, :expires_at)')
+        ->execute([
+            ':user_type' => $userType,
+            ':user_id' => $userId,
+            ':token_hash' => $tokenHash,
+            ':expires_at' => $expiresAt,
+        ]);
+
+    $baseUrl = app_base_url($pdo);
+    $resetUrl = $baseUrl . '/client/index.html?reset_token=' . rawurlencode($token);
+    $subject = '[AppCarte] Reinitialisation de votre mot de passe';
+    $body = "Bonjour {$username},\n\n"
+        . "Un lien de reinitialisation de mot de passe vient d'etre genere pour votre compte.\n"
+        . "Lien: {$resetUrl}\n\n"
+        . "Ce lien expire le {$expiresAt} et ne peut etre utilise qu'une seule fois.\n"
+        . "Si vous n'etes pas a l'origine de cette demande, ignorez cet email.\n";
+
+    if (!send_plain_email([$email], $subject, $body)) {
+        log_password_reset_audit($pdo, $userType, $userId, $username, $email, 'failed', 'send_plain_email returned false');
+        throw new RuntimeException('Impossible d\'envoyer l\'email de reinitialisation');
+    }
+
+    log_password_reset_audit($pdo, $userType, $userId, $username, $email, 'sent', null);
+}
+
+function log_password_reset_audit(PDO $pdo, string $userType, int $userId, string $username, string $email, string $status, ?string $errorMessage): void
+{
+    try {
+        $pdo->prepare('INSERT INTO password_reset_audit (user_type, user_id, username, email, status, error_message) VALUES (:user_type, :user_id, :username, :email, :status, :error_message)')
+            ->execute([
+                ':user_type' => $userType,
+                ':user_id' => $userId,
+                ':username' => $username,
+                ':email' => $email,
+                ':status' => $status,
+                ':error_message' => $errorMessage,
+            ]);
+    } catch (Throwable $e) {
+        error_log('AppCarte: failed to write password_reset_audit: ' . $e->getMessage());
+    }
+}
+
+function app_base_url(PDO $pdo): string
+{
+    $configuredBase = get_public_assets_base_url($pdo);
+    if ($configuredBase !== '') {
+        return rtrim($configuredBase, '/');
+    }
+
+    $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '') {
+        return '';
+    }
+    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api/index.php')), '/');
+    $basePath = preg_replace('#/api$#', '', $scriptDir);
+    return $scheme . '://' . $host . ($basePath ?: '');
+}
+
 function save_settings(PDO $pdo): void
 {
     $input = get_json_input();
-    $allowedKeys = ['org_name', 'org_logo_url', 'default_client_icon', 'default_producer_icon', 'farm_direct_icon'];
+    $allowedKeys = [
+        'org_name',
+        'org_logo_url',
+        'default_client_icon',
+        'default_producer_icon',
+        'farm_direct_icon',
+        'admin_notification_emails',
+        'public_assets_base_url',
+        'smtp_host',
+        'smtp_port',
+        'smtp_encryption',
+        'smtp_username',
+        'smtp_password',
+        'smtp_from_email',
+        'smtp_from_name',
+    ];
 
     $stmt = $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)');
     foreach ($allowedKeys as $key) {
@@ -675,6 +1423,28 @@ function upload_activity_icon(): void
 }
 
 function geocode_address_admin(): void
+{
+    $input = get_json_input();
+    $address = trim((string)($input['address'] ?? ''));
+    if ($address === '') {
+        json_response(['ok' => false, 'error' => 'Adresse requise'], 422);
+    }
+
+    $geo = geocode_address_text($address);
+    if ($geo === null) {
+        json_response(['ok' => true, 'found' => false]);
+    }
+
+    json_response([
+        'ok' => true,
+        'found' => true,
+        'lat' => (float)$geo['lat'],
+        'lng' => (float)$geo['lng'],
+        'display_name' => $geo['display_name'] ?? '',
+    ]);
+}
+
+function geocode_address_client(): void
 {
     $input = get_json_input();
     $address = trim((string)($input['address'] ?? ''));
@@ -941,6 +1711,15 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
         'phone' => format_phone($input['phone'] ?? ''),
         'email' => trim((string)($input['email'] ?? '')),
         'website' => trim((string)($input['website'] ?? '')),
+        'facebook_url' => trim((string)($input['facebook_url'] ?? '')),
+        'instagram_url' => trim((string)($input['instagram_url'] ?? '')),
+        'linkedin_url' => trim((string)($input['linkedin_url'] ?? '')),
+        'logo_url' => trim((string)($input['logo_url'] ?? '')),
+        'photo_cover_url' => trim((string)($input['photo_cover_url'] ?? '')),
+        'slug' => slugify_text((string)($input['slug'] ?? ($input['name'] ?? ''))),
+        'description_short' => trim((string)($input['description_short'] ?? '')),
+        'description_long' => trim((string)($input['description_long'] ?? '')),
+        'is_public' => array_key_exists('is_public', $input) ? (!empty($input['is_public']) ? 1 : 0) : 1,
         'supplier_type' => trim((string)($input['supplier_type'] ?? ($input['type'] ?? ''))),
         'activity_text' => implode('; ', $activityNames),
         'notes' => trim((string)($input['notes'] ?? '')),
@@ -991,7 +1770,7 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
 
     if ($existing) {
         $supplierId = (int)$existing['id'];
-        $fields = ['name', 'address', 'city', 'postal_code', 'country', 'latitude', 'longitude', 'phone', 'email', 'website', 'activity_text', 'supplier_type', 'notes'];
+        $fields = ['name', 'address', 'city', 'postal_code', 'country', 'latitude', 'longitude', 'phone', 'email', 'website', 'facebook_url', 'instagram_url', 'linkedin_url', 'logo_url', 'photo_cover_url', 'slug', 'description_short', 'description_long', 'is_public', 'activity_text', 'supplier_type', 'notes'];
         $updatePayload = [];
         foreach ($fields as $field) {
             $incoming = (string)($supplier[$field] ?? '');
@@ -1039,6 +1818,7 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
 
         if ($updatePayload) {
             $updatePayload['normalized_name'] = normalize_text($supplier['name']);
+            $updatePayload['public_updated_at'] = date('Y-m-d H:i:s');
             $setParts = [];
             $params = [':id' => $supplierId];
             foreach ($updatePayload as $field => $value) {
@@ -1050,9 +1830,9 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
         }
     } else {
         $sql = "INSERT INTO suppliers
-            (name, normalized_name, address, city, postal_code, country, latitude, longitude, phone, email, website, supplier_type, activity_text, notes)
+            (name, normalized_name, address, city, postal_code, country, latitude, longitude, phone, email, website, facebook_url, instagram_url, linkedin_url, logo_url, photo_cover_url, slug, description_short, description_long, is_public, public_updated_at, supplier_type, activity_text, notes)
             VALUES
-            (:name, :normalized_name, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :website, :supplier_type, :activity_text, :notes)";
+            (:name, :normalized_name, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :website, :facebook_url, :instagram_url, :linkedin_url, :logo_url, :photo_cover_url, :slug, :description_short, :description_long, :is_public, :public_updated_at, :supplier_type, :activity_text, :notes)";
         $pdo->prepare($sql)->execute([
             ':name' => $supplier['name'],
             ':normalized_name' => normalize_text($supplier['name']),
@@ -1065,6 +1845,16 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
             ':phone' => $supplier['phone'],
             ':email' => $supplier['email'],
             ':website' => $supplier['website'],
+            ':facebook_url' => $supplier['facebook_url'],
+            ':instagram_url' => $supplier['instagram_url'],
+            ':linkedin_url' => $supplier['linkedin_url'],
+            ':logo_url' => $supplier['logo_url'],
+            ':photo_cover_url' => $supplier['photo_cover_url'],
+            ':slug' => $supplier['slug'],
+            ':description_short' => $supplier['description_short'],
+            ':description_long' => $supplier['description_long'],
+            ':is_public' => $supplier['is_public'],
+            ':public_updated_at' => date('Y-m-d H:i:s'),
             ':supplier_type' => $supplier['supplier_type'],
             ':activity_text' => $supplier['activity_text'],
             ':notes' => $supplier['notes'],
@@ -1105,6 +1895,352 @@ function delete_supplier(PDO $pdo): void
 
     $pdo->prepare('DELETE FROM suppliers WHERE id=:id')->execute([':id' => $id]);
     json_response(['ok' => true]);
+}
+
+function get_setting_value(PDO $pdo, string $key, string $default = ''): string
+{
+    $stmt = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key=:key LIMIT 1');
+    $stmt->execute([':key' => $key]);
+    $value = $stmt->fetchColumn();
+    return $value !== false ? (string)$value : $default;
+}
+
+function set_setting_value(PDO $pdo, string $key, string $value): void
+{
+    $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (:key, :value) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)')
+        ->execute([':key' => $key, ':value' => $value]);
+}
+
+function get_public_assets_base_url(PDO $pdo): string
+{
+    $configured = trim(get_setting_value($pdo, 'public_assets_base_url', ''));
+    if ($configured !== '') {
+        return rtrim($configured, '/');
+    }
+
+    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+    if ($host !== '' && !preg_match('/^(localhost|127\.0\.0\.1)(:\d+)?$/i', $host)) {
+        $isHttps = !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off';
+        $scheme = $isHttps ? 'https' : 'http';
+        return $scheme . '://' . $host;
+    }
+
+    return '';
+}
+
+function absolutize_export_url(PDO $pdo, string $url): string
+{
+    $url = trim($url);
+    if ($url === '' || preg_match('/^https?:\/\//i', $url)) {
+        return $url;
+    }
+    if (strpos($url, '/') !== 0) {
+        return $url;
+    }
+
+    $base = get_public_assets_base_url($pdo);
+    return $base === '' ? $url : $base . $url;
+}
+
+function absolutize_export_url_list(PDO $pdo, string $listValue): string
+{
+    $parts = preg_split('/\s*;\s*/', trim($listValue)) ?: [];
+    $parts = array_values(array_filter($parts, static fn($v) => $v !== ''));
+    if (!$parts) {
+        return '';
+    }
+
+    $parts = array_map(static fn($v) => absolutize_export_url($pdo, (string)$v), $parts);
+    return implode('; ', $parts);
+}
+
+function parse_email_list(string $value): array
+{
+    $parts = preg_split('/[;,\s]+/', trim($value)) ?: [];
+    $emails = [];
+    foreach ($parts as $item) {
+        $email = filter_var(trim((string)$item), FILTER_VALIDATE_EMAIL);
+        if ($email !== false) {
+            $emails[] = (string)$email;
+        }
+    }
+    return array_values(array_unique($emails));
+}
+
+function get_notification_mail_config(PDO $pdo): array
+{
+    $config = require __DIR__ . '/config.php';
+    $fallback = (array)($config['notifications'] ?? []);
+
+    $result = [
+        'host' => trim(get_setting_value($pdo, 'smtp_host', (string)($fallback['smtp_host'] ?? ''))),
+        'port' => (int)trim(get_setting_value($pdo, 'smtp_port', (string)($fallback['smtp_port'] ?? ''))),
+        'encryption' => strtolower(trim(get_setting_value($pdo, 'smtp_encryption', (string)($fallback['smtp_encryption'] ?? '')))),
+        'username' => trim(get_setting_value($pdo, 'smtp_username', (string)($fallback['smtp_username'] ?? ''))),
+        'password' => (string)get_setting_value($pdo, 'smtp_password', (string)($fallback['smtp_password'] ?? '')),
+        'from_email' => trim(get_setting_value($pdo, 'smtp_from_email', (string)($fallback['from_email'] ?? ''))),
+        'from_name' => trim(get_setting_value($pdo, 'smtp_from_name', (string)($fallback['from_name'] ?? 'AppCarte Limap'))),
+    ];
+
+    if (!in_array($result['encryption'], ['', 'tls', 'ssl'], true)) {
+        $result['encryption'] = 'tls';
+    }
+    if ($result['port'] <= 0) {
+        $result['port'] = $result['encryption'] === 'ssl' ? 465 : 587;
+    }
+    return $result;
+}
+
+function smtp_expect($socket, array $validCodes, ?string &$fullResponse = null): bool
+{
+    $response = '';
+    while (!feof($socket)) {
+        $line = fgets($socket, 1024);
+        if ($line === false) {
+            break;
+        }
+        $response .= $line;
+        if (preg_match('/^\d{3}\s/', $line)) {
+            break;
+        }
+    }
+
+    $fullResponse = trim($response);
+    if (!preg_match('/^(\d{3})/', $response, $m)) {
+        return false;
+    }
+    $code = (int)$m[1];
+    return in_array($code, $validCodes, true);
+}
+
+function smtp_command($socket, string $command, array $validCodes, ?string &$response = null): bool
+{
+    fwrite($socket, $command . "\r\n");
+    return smtp_expect($socket, $validCodes, $response);
+}
+
+function smtp_send_plain_email(array $smtp, array $to, string $subject, string $body, ?string &$error = null): bool
+{
+    $error = null;
+    $host = trim((string)($smtp['host'] ?? ''));
+    if ($host === '') {
+        $error = 'SMTP host manquant';
+        return false;
+    }
+
+    $encryption = strtolower(trim((string)($smtp['encryption'] ?? '')));
+    $port = (int)($smtp['port'] ?? ($encryption === 'ssl' ? 465 : 587));
+    $remote = ($encryption === 'ssl' ? 'ssl://' : '') . $host . ':' . $port;
+
+    $errno = 0;
+    $errstr = '';
+    $socket = @stream_socket_client($remote, $errno, $errstr, 20);
+    if (!$socket) {
+        $error = 'Connexion SMTP impossible: ' . $errstr;
+        return false;
+    }
+
+    stream_set_timeout($socket, 20);
+
+    $resp = '';
+    if (!smtp_expect($socket, [220], $resp)) {
+        fclose($socket);
+        $error = 'SMTP greeting invalide: ' . $resp;
+        return false;
+    }
+
+    $helloHost = gethostname() ?: 'localhost';
+    if (!smtp_command($socket, 'EHLO ' . $helloHost, [250], $resp)) {
+        if (!smtp_command($socket, 'HELO ' . $helloHost, [250], $resp)) {
+            fclose($socket);
+            $error = 'EHLO/HELO refusé: ' . $resp;
+            return false;
+        }
+    }
+
+    if ($encryption === 'tls') {
+        if (!smtp_command($socket, 'STARTTLS', [220], $resp)) {
+            fclose($socket);
+            $error = 'STARTTLS refusé: ' . $resp;
+            return false;
+        }
+        if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+            fclose($socket);
+            $error = 'Activation TLS impossible';
+            return false;
+        }
+        if (!smtp_command($socket, 'EHLO ' . $helloHost, [250], $resp)) {
+            fclose($socket);
+            $error = 'EHLO après STARTTLS refusé: ' . $resp;
+            return false;
+        }
+    }
+
+    $username = (string)($smtp['username'] ?? '');
+    $password = (string)($smtp['password'] ?? '');
+    if ($username !== '') {
+        if (!smtp_command($socket, 'AUTH LOGIN', [334], $resp)) {
+            fclose($socket);
+            $error = 'AUTH LOGIN refusé: ' . $resp;
+            return false;
+        }
+        if (!smtp_command($socket, base64_encode($username), [334], $resp)) {
+            fclose($socket);
+            $error = 'SMTP username refusé: ' . $resp;
+            return false;
+        }
+        if (!smtp_command($socket, base64_encode($password), [235], $resp)) {
+            fclose($socket);
+            $error = 'SMTP password refusé: ' . $resp;
+            return false;
+        }
+    }
+
+    $fromEmail = trim((string)($smtp['from_email'] ?? ''));
+    if ($fromEmail === '' || filter_var($fromEmail, FILTER_VALIDATE_EMAIL) === false) {
+        $fromEmail = ($username !== '' && filter_var($username, FILTER_VALIDATE_EMAIL)) ? $username : ('noreply@' . (gethostname() ?: 'localhost'));
+    }
+    $fromName = trim((string)($smtp['from_name'] ?? 'AppCarte Limap'));
+
+    if (!smtp_command($socket, 'MAIL FROM:<' . $fromEmail . '>', [250], $resp)) {
+        fclose($socket);
+        $error = 'MAIL FROM refusé: ' . $resp;
+        return false;
+    }
+
+    foreach ($to as $recipient) {
+        if (!smtp_command($socket, 'RCPT TO:<' . $recipient . '>', [250, 251], $resp)) {
+            fclose($socket);
+            $error = 'RCPT TO refusé pour ' . $recipient . ': ' . $resp;
+            return false;
+        }
+    }
+
+    if (!smtp_command($socket, 'DATA', [354], $resp)) {
+        fclose($socket);
+        $error = 'DATA refusé: ' . $resp;
+        return false;
+    }
+
+    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $headers = [
+        'From: ' . ($fromName !== '' ? '"' . addslashes($fromName) . '" ' : '') . '<' . $fromEmail . '>',
+        'To: ' . implode(', ', $to),
+        'Subject: ' . $encodedSubject,
+        'Date: ' . date(DATE_RFC2822),
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+    ];
+
+    $normalizedBody = str_replace(["\r\n", "\r"], "\n", $body);
+    $normalizedBody = preg_replace('/^\./m', '..', $normalizedBody);
+    $data = implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n", "\r\n", $normalizedBody) . "\r\n.\r\n";
+    fwrite($socket, $data);
+
+    if (!smtp_expect($socket, [250], $resp)) {
+        fclose($socket);
+        $error = 'Validation DATA refusée: ' . $resp;
+        return false;
+    }
+
+    smtp_command($socket, 'QUIT', [221], $resp);
+    fclose($socket);
+    return true;
+}
+
+function admin_notification_recipients(PDO $pdo): array
+{
+    $settingEmails = get_setting_value($pdo, 'admin_notification_emails', '');
+    if ($settingEmails !== '') {
+        return parse_email_list($settingEmails);
+    }
+
+    $config = require __DIR__ . '/config.php';
+    $fallback = (string)($config['notifications']['admin_emails'] ?? '');
+    return parse_email_list($fallback);
+}
+
+function send_plain_email(array $to, string $subject, string $body): bool
+{
+    if (!$to) {
+        return false;
+    }
+
+    $pdo = get_db();
+    $smtp = get_notification_mail_config($pdo);
+    if (trim((string)($smtp['host'] ?? '')) !== '') {
+        $smtpError = null;
+        if (smtp_send_plain_email($smtp, $to, $subject, $body, $smtpError)) {
+            return true;
+        }
+        error_log('AppCarte SMTP send failed: ' . (string)$smtpError);
+        return false;
+    }
+
+    $config = require __DIR__ . '/config.php';
+    $from = trim((string)($smtp['from_email'] ?? ($config['notifications']['from_email'] ?? '')));
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+    ];
+    if ($from !== '' && filter_var($from, FILTER_VALIDATE_EMAIL)) {
+        $headers[] = 'From: ' . $from;
+    }
+
+    return @mail(implode(',', $to), $subject, $body, implode("\r\n", $headers));
+}
+
+function send_test_notification(PDO $pdo): void
+{
+    $input = get_json_input();
+    $manualTo = parse_email_list((string)($input['to'] ?? ''));
+    $to = $manualTo ?: admin_notification_recipients($pdo);
+    if (!$to) {
+        json_response(['ok' => false, 'error' => 'Aucun destinataire configuré'], 422);
+    }
+
+    $subject = '[AppCarte] Test notification SMTP';
+    $body = "Ceci est un email de test depuis AppCarte Limap.\n\n"
+        . 'Date: ' . date('Y-m-d H:i:s') . "\n"
+        . 'Serveur: ' . (gethostname() ?: 'localhost') . "\n";
+
+    if (!send_plain_email($to, $subject, $body)) {
+        json_response(['ok' => false, 'error' => 'Échec de l\'envoi du mail de test (vérifie la config SMTP).'], 500);
+    }
+
+    json_response(['ok' => true]);
+}
+
+function notify_admin_new_change_request(PDO $pdo, int $requestId, int $supplierId, int $clientId, string $fieldName, string $oldValue, string $newValue): void
+{
+    $to = admin_notification_recipients($pdo);
+    if (!$to) {
+        return;
+    }
+
+    $supplierStmt = $pdo->prepare('SELECT name FROM suppliers WHERE id=:id LIMIT 1');
+    $supplierStmt->execute([':id' => $supplierId]);
+    $supplierName = (string)($supplierStmt->fetchColumn() ?: 'Fournisseur #' . $supplierId);
+
+    $clientStmt = $pdo->prepare('SELECT name FROM clients WHERE id=:id LIMIT 1');
+    $clientStmt->execute([':id' => $clientId]);
+    $clientName = (string)($clientStmt->fetchColumn() ?: 'Client #' . $clientId);
+
+    $subject = '[AppCarte] Nouvelle demande de modification';
+    $body = "Une nouvelle demande de modification a été soumise.\n\n"
+        . "Demande ID: {$requestId}\n"
+        . "Client: {$clientName}\n"
+        . "Fournisseur: {$supplierName}\n"
+        . "Champ: {$fieldName}\n"
+        . "Ancienne valeur: {$oldValue}\n"
+        . "Nouvelle valeur: {$newValue}\n\n"
+        . "Ouvre l'admin pour la traiter dans l'onglet Demandes.";
+
+    if (!send_plain_email($to, $subject, $body)) {
+        error_log('AppCarte: notification email failed for request #' . $requestId);
+    }
 }
 
 function sync_activity_links(PDO $pdo, int $supplierId, array $activityNames, bool $replace = true): void
@@ -1432,13 +2568,14 @@ function client_bootstrap(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'client_id requis'], 422);
     }
 
-    $clientStmt = $pdo->prepare('SELECT id, name, client_type, logo_url, city, address, postal_code, phone, email, website FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
+    $clientStmt = $pdo->prepare('SELECT id, name, client_type, logo_url, city, address, postal_code, country, latitude, longitude, phone, email, website, facebook_url, instagram_url, description_short, description_long FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
     $clientStmt->execute([':id' => $clientId]);
     $client = $clientStmt->fetch();
     if (!$client) {
         json_response(['ok' => false, 'error' => 'Client introuvable'], 404);
     }
     $client['phone'] = format_phone($client['phone'] ?? '');
+    $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
 
     $sql = "SELECT
             s.id,
@@ -1452,6 +2589,14 @@ function client_bootstrap(PDO $pdo): void
             s.phone,
             s.email,
             s.website,
+            s.facebook_url,
+            s.instagram_url,
+            s.linkedin_url,
+            s.logo_url,
+            s.photo_cover_url,
+            s.slug,
+            s.description_short,
+            s.description_long,
             s.supplier_type,
             s.activity_text AS global_activity_text,
             s.notes AS global_notes,
@@ -1465,7 +2610,17 @@ function client_bootstrap(PDO $pdo): void
             csp.labels_text AS profile_labels_text,
             csp.notes AS profile_notes,
             csp.relationship_status,
-            csp.updated_at AS profile_updated_at
+            csp.updated_at AS profile_updated_at,
+            (
+                SELECT GROUP_CONCAT(csp2.activity_text SEPARATOR '; ')
+                FROM client_supplier_profiles csp2
+                WHERE csp2.supplier_id = s.id AND csp2.client_id != :client_id2
+            ) AS other_clients_activity_text,
+            (
+                SELECT GROUP_CONCAT(csp2.labels_text SEPARATOR '; ')
+                FROM client_supplier_profiles csp2
+                WHERE csp2.supplier_id = s.id AND csp2.client_id != :client_id3
+            ) AS other_clients_labels_text
         FROM client_suppliers cs
         JOIN suppliers s ON s.id = cs.supplier_id
         LEFT JOIN client_supplier_profiles csp ON csp.client_id = cs.client_id AND csp.supplier_id = cs.supplier_id
@@ -1473,15 +2628,17 @@ function client_bootstrap(PDO $pdo): void
         ORDER BY s.name";
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':client_id' => $clientId]);
+    $stmt->execute([':client_id' => $clientId, ':client_id2' => $clientId, ':client_id3' => $clientId]);
     $suppliers = $stmt->fetchAll();
 
     $activities = $pdo->query('SELECT id, name FROM activities WHERE is_active=1 ORDER BY family, name')->fetchAll();
     $labels = $pdo->query('SELECT id, name FROM labels WHERE is_active=1 ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT id, name FROM supplier_types WHERE is_active=1 ORDER BY name')->fetchAll();
 
-    $suppliers = array_map(function (array $row) {
+    $suppliers = array_map(function (array $row) use ($pdo) {
         $row['phone'] = format_phone($row['phone'] ?? '');
+        $row['logo_url'] = absolutize_export_url($pdo, (string)($row['logo_url'] ?? ''));
+        $row['photo_cover_url'] = absolutize_export_url($pdo, (string)($row['photo_cover_url'] ?? ''));
         return $row;
     }, $suppliers);
 
@@ -1493,6 +2650,102 @@ function client_bootstrap(PDO $pdo): void
         'labels' => $labels,
         'supplier_types' => $supplierTypes,
     ]);
+}
+
+function save_client_profile(PDO $pdo): void
+{
+    assert_client_can_write_profile();
+
+    $input = get_json_input();
+    $clientId = resolve_effective_client_id($input);
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $name = trim((string)($input['name'] ?? ''));
+    if ($name === '') {
+        json_response(['ok' => false, 'error' => 'Nom client requis'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
+    $stmt->execute([':id' => $clientId]);
+    if (!$stmt->fetch()) {
+        json_response(['ok' => false, 'error' => 'Client introuvable'], 404);
+    }
+
+    $payload = [
+        ':id' => $clientId,
+        ':name' => $name,
+        ':client_type' => trim((string)($input['client_type'] ?? '')),
+        ':email' => trim((string)($input['email'] ?? '')),
+        ':phone' => format_phone((string)($input['phone'] ?? '')),
+        ':website' => trim((string)($input['website'] ?? '')),
+        ':facebook_url' => trim((string)($input['facebook_url'] ?? '')),
+        ':instagram_url' => trim((string)($input['instagram_url'] ?? '')),
+        ':logo_url' => trim((string)($input['logo_url'] ?? '')),
+        ':address' => trim((string)($input['address'] ?? '')),
+        ':city' => trim((string)($input['city'] ?? '')),
+        ':postal_code' => trim((string)($input['postal_code'] ?? '')),
+        ':country' => trim((string)($input['country'] ?? '')),
+        ':latitude' => ($input['latitude'] ?? '') !== '' ? (float)$input['latitude'] : null,
+        ':longitude' => ($input['longitude'] ?? '') !== '' ? (float)$input['longitude'] : null,
+        ':description_short' => trim((string)($input['description_short'] ?? '')),
+        ':description_long' => trim((string)($input['description_long'] ?? '')),
+    ];
+
+    $pdo->prepare('UPDATE clients SET
+        name=:name,
+        client_type=:client_type,
+        email=:email,
+        phone=:phone,
+        website=:website,
+        facebook_url=:facebook_url,
+        instagram_url=:instagram_url,
+        logo_url=:logo_url,
+        address=:address,
+        city=:city,
+        postal_code=:postal_code,
+        country=:country,
+        latitude=:latitude,
+        longitude=:longitude,
+        description_short=:description_short,
+        description_long=:description_long,
+        public_updated_at=NOW()
+        WHERE id=:id')
+        ->execute($payload);
+
+    json_response(['ok' => true]);
+}
+
+function merge_client_changes_into_global(array $globalItems, array $prevClientItems, array $newClientItems): array
+{
+    $norm = fn($v) => mb_strtolower(trim((string)$v), 'UTF-8');
+    $prevNormed = array_map($norm, $prevClientItems);
+    $newNormed  = array_map($norm, $newClientItems);
+    // Items this client explicitly removed (were in their prev profile, no longer in new)
+    $removedNorm = array_values(array_diff($prevNormed, $newNormed));
+
+    $result   = [];
+    $seenNorm = [];
+    // Keep all global items except those removed by this client
+    foreach ($globalItems as $item) {
+        $n = $norm($item);
+        if (in_array($n, $removedNorm, true) || in_array($n, $seenNorm, true)) {
+            continue;
+        }
+        $result[]   = $item;
+        $seenNorm[] = $n;
+    }
+    // Add newly submitted items from this client
+    foreach ($newClientItems as $item) {
+        $n = $norm($item);
+        if (in_array($n, $seenNorm, true)) {
+            continue;
+        }
+        $result[]   = $item;
+        $seenNorm[] = $n;
+    }
+    return $result;
 }
 
 function save_client_supplier_profile(PDO $pdo): void
@@ -1567,12 +2820,52 @@ function save_client_supplier_profile(PDO $pdo): void
         write_supplier_audit($pdo, $supplierId, 'client_profile_update', $field, $oldValue, $newValue, ['client_id' => $clientId]);
     }
 
+    // Merge this client's changes into the global supplier record, preserving
+    // contributions from other clients.
+    $gSupStmt = $pdo->prepare('SELECT activity_text FROM suppliers WHERE id=:id LIMIT 1');
+    $gSupStmt->execute([':id' => $supplierId]);
+    $gSup = $gSupStmt->fetch();
+    $globalActivities    = parse_csv_list($gSup['activity_text'] ?? '');
+    $prevClientActivities = parse_csv_list($existing['activity_text'] ?? '');
+    $newClientActivities  = parse_csv_list($activityText);
+    $mergedActivities = merge_client_changes_into_global($globalActivities, $prevClientActivities, $newClientActivities);
+
+    $globalLabelsStr  = get_supplier_labels_csv($pdo, $supplierId);
+    $globalLabels     = parse_csv_list($globalLabelsStr);
+    $prevClientLabels = parse_csv_list($existing['labels_text'] ?? '');
+    $newClientLabels  = parse_csv_list($labelsText);
+    $mergedLabels = merge_client_changes_into_global($globalLabels, $prevClientLabels, $newClientLabels);
+
+    $pdo->prepare('UPDATE suppliers SET activity_text=:activity_text WHERE id=:id')
+        ->execute([':activity_text' => implode('; ', $mergedActivities), ':id' => $supplierId]);
+    sync_supplier_labels($pdo, $supplierId, $mergedLabels);
+
     json_response(['ok' => true]);
 }
 
 function allowed_global_change_fields(): array
 {
-    return ['name', 'address', 'city', 'postal_code', 'country', 'phone', 'email', 'website', 'supplier_type', 'activity_text', 'labels'];
+    return [
+        'name',
+        'address',
+        'city',
+        'postal_code',
+        'country',
+        'phone',
+        'email',
+        'website',
+        'facebook_url',
+        'instagram_url',
+        'linkedin_url',
+        'logo_url',
+        'photo_cover_url',
+        'slug',
+        'description_short',
+        'description_long',
+        'supplier_type',
+        'activity_text',
+        'labels',
+    ];
 }
 
 function get_supplier_labels_csv(PDO $pdo, int $supplierId): string
@@ -1603,7 +2896,7 @@ function assert_client_can_create_change_request(): void
 {
     start_app_session();
     if (!empty($_SESSION['is_admin'])) {
-        json_response(['ok' => false, 'error' => 'Cette action est réservée aux comptes client'], 403);
+        return;
     }
     $role = (string)($_SESSION['client_role'] ?? '');
     if ($role === 'client_reader' || $role === '') {
@@ -1648,6 +2941,501 @@ function sync_supplier_labels(PDO $pdo, int $supplierId, array $labelNames): voi
     }
 }
 
+function resolve_change_request_user_id(PDO $pdo, int $clientId): int
+{
+    $actor = current_actor_context();
+    if ($actor['actor_type'] === 'client_user' && $actor['actor_id'] !== null) {
+        return (int)$actor['actor_id'];
+    }
+    if ($actor['actor_type'] === 'admin') {
+        $proxyStmt = $pdo->prepare('SELECT id FROM client_users WHERE client_id=:client_id AND is_active=1 ORDER BY id LIMIT 1');
+        $proxyStmt->execute([':client_id' => $clientId]);
+        return (int)($proxyStmt->fetchColumn() ?: 0);
+    }
+    return 0;
+}
+
+function save_supplier_creation_request(PDO $pdo): void
+{
+    assert_client_can_create_change_request();
+
+    $input = get_json_input();
+    $clientId = resolve_effective_client_id($input);
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $name = trim((string)($input['name'] ?? ''));
+    if ($name === '') {
+        json_response(['ok' => false, 'error' => 'Nom fournisseur requis'], 422);
+    }
+
+    $requestedByUserId = resolve_change_request_user_id($pdo, $clientId);
+    if ($requestedByUserId <= 0) {
+        json_response(['ok' => false, 'error' => 'Aucun utilisateur client actif trouvé pour ce client (crée un compte client actif).'], 422);
+    }
+
+    $activityText = supplier_field_for_change_request('activity_text', (string)($input['activity_text'] ?? ''));
+    $labelsText = supplier_field_for_change_request('labels', (string)($input['labels_text'] ?? ''));
+
+    $pdo->prepare('INSERT INTO client_supplier_creation_requests
+        (client_id, requested_by_user_id, name, supplier_type, activity_text, labels_text, address, city, postal_code, country, phone, email, website, notes, status)
+        VALUES
+        (:client_id, :requested_by_user_id, :name, :supplier_type, :activity_text, :labels_text, :address, :city, :postal_code, :country, :phone, :email, :website, :notes, "pending")')
+        ->execute([
+            ':client_id' => $clientId,
+            ':requested_by_user_id' => $requestedByUserId,
+            ':name' => $name,
+            ':supplier_type' => trim((string)($input['supplier_type'] ?? '')),
+            ':activity_text' => $activityText,
+            ':labels_text' => $labelsText,
+            ':address' => trim((string)($input['address'] ?? '')),
+            ':city' => trim((string)($input['city'] ?? '')),
+            ':postal_code' => trim((string)($input['postal_code'] ?? '')),
+            ':country' => trim((string)($input['country'] ?? 'France')),
+            ':phone' => format_phone((string)($input['phone'] ?? '')),
+            ':email' => trim((string)($input['email'] ?? '')),
+            ':website' => trim((string)($input['website'] ?? '')),
+            ':notes' => trim((string)($input['notes'] ?? '')),
+        ]);
+
+    json_response(['ok' => true]);
+}
+
+function list_supplier_creation_requests_for_client(PDO $pdo): void
+{
+    $inputClientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+    $status = trim((string)($_GET['status'] ?? ''));
+
+    $clientId = resolve_effective_client_id(['client_id' => $inputClientId]);
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $sql = 'SELECT csr.id, csr.client_id, csr.requested_by_user_id, csr.name, csr.supplier_type, csr.activity_text, csr.labels_text, csr.address, csr.city, csr.postal_code, csr.country, csr.phone, csr.email, csr.website, csr.notes, csr.status, csr.approved_supplier_id, csr.reviewed_by_admin, csr.reviewed_at, csr.review_note, csr.created_at, cu.username AS requested_by_username, s.name AS approved_supplier_name
+            FROM client_supplier_creation_requests csr
+            LEFT JOIN client_users cu ON cu.id = csr.requested_by_user_id
+            LEFT JOIN suppliers s ON s.id = csr.approved_supplier_id
+            WHERE csr.client_id=:client_id';
+    $params = [':client_id' => $clientId];
+
+    if ($status !== '' && in_array($status, ['pending', 'approved', 'rejected'], true)) {
+        $sql .= ' AND csr.status=:status';
+        $params[':status'] = $status;
+    }
+
+    $sql .= ' ORDER BY csr.created_at DESC, csr.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    json_response(['ok' => true, 'requests' => $stmt->fetchAll()]);
+}
+
+function search_supplier_link_candidates_for_client(PDO $pdo): void
+{
+    $inputClientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+    $query = trim((string)($_GET['q'] ?? ''));
+
+    $clientId = resolve_effective_client_id(['client_id' => $inputClientId]);
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    if (mb_strlen($query, 'UTF-8') < 2) {
+        json_response(['ok' => true, 'suppliers' => []]);
+    }
+
+    $like = '%' . $query . '%';
+    $sql = 'SELECT s.id, s.name, s.city, s.postal_code, s.supplier_type
+            FROM suppliers s
+            LEFT JOIN client_suppliers cs ON cs.supplier_id = s.id AND cs.client_id = :client_id
+            WHERE cs.id IS NULL
+              AND (
+                s.name LIKE :q
+                OR s.city LIKE :q
+                OR s.postal_code LIKE :q
+                OR s.email LIKE :q
+              )
+            ORDER BY s.name ASC
+            LIMIT 30';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':client_id' => $clientId,
+        ':q' => $like,
+    ]);
+
+    json_response(['ok' => true, 'suppliers' => $stmt->fetchAll()]);
+}
+
+function save_supplier_link_request(PDO $pdo): void
+{
+    assert_client_can_create_change_request();
+
+    $input = get_json_input();
+    $clientId = resolve_effective_client_id($input);
+    $supplierId = isset($input['supplier_id']) ? (int)$input['supplier_id'] : 0;
+    $note = trim((string)($input['note'] ?? ''));
+
+    if ($clientId <= 0 || $supplierId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id et supplier_id requis'], 422);
+    }
+
+    $existsStmt = $pdo->prepare('SELECT id, name FROM suppliers WHERE id=:id LIMIT 1');
+    $existsStmt->execute([':id' => $supplierId]);
+    $supplier = $existsStmt->fetch();
+    if (!$supplier) {
+        json_response(['ok' => false, 'error' => 'Fournisseur introuvable'], 404);
+    }
+
+    $linkStmt = $pdo->prepare('SELECT 1 FROM client_suppliers WHERE client_id=:client_id AND supplier_id=:supplier_id LIMIT 1');
+    $linkStmt->execute([
+        ':client_id' => $clientId,
+        ':supplier_id' => $supplierId,
+    ]);
+    if ($linkStmt->fetch()) {
+        json_response(['ok' => false, 'error' => 'Ce fournisseur est déjà lié à votre client'], 422);
+    }
+
+    $dupStmt = $pdo->prepare('SELECT id FROM client_supplier_link_requests WHERE client_id=:client_id AND supplier_id=:supplier_id AND status="pending" LIMIT 1');
+    $dupStmt->execute([
+        ':client_id' => $clientId,
+        ':supplier_id' => $supplierId,
+    ]);
+    if ($dupStmt->fetch()) {
+        json_response(['ok' => false, 'error' => 'Une demande de rattachement est déjà en attente pour ce fournisseur'], 422);
+    }
+
+    $requestedByUserId = resolve_change_request_user_id($pdo, $clientId);
+    if ($requestedByUserId <= 0) {
+        json_response(['ok' => false, 'error' => 'Aucun utilisateur client actif trouvé pour ce client (crée un compte client actif).'], 422);
+    }
+
+    $pdo->prepare('INSERT INTO client_supplier_link_requests (client_id, requested_by_user_id, supplier_id, note, status)
+        VALUES (:client_id, :requested_by_user_id, :supplier_id, :note, "pending")')
+        ->execute([
+            ':client_id' => $clientId,
+            ':requested_by_user_id' => $requestedByUserId,
+            ':supplier_id' => $supplierId,
+            ':note' => $note,
+        ]);
+
+    $requestId = (int)$pdo->lastInsertId();
+    notify_admin_new_supplier_link_request($pdo, $requestId, $supplierId, $clientId, $note);
+
+    json_response(['ok' => true]);
+}
+
+function notify_admin_new_supplier_link_request(PDO $pdo, int $requestId, int $supplierId, int $clientId, string $note): void
+{
+    $to = admin_notification_recipients($pdo);
+    if (!$to) {
+        return;
+    }
+
+    $supplierStmt = $pdo->prepare('SELECT name FROM suppliers WHERE id=:id LIMIT 1');
+    $supplierStmt->execute([':id' => $supplierId]);
+    $supplierName = (string)($supplierStmt->fetchColumn() ?: 'Fournisseur #' . $supplierId);
+
+    $clientStmt = $pdo->prepare('SELECT name FROM clients WHERE id=:id LIMIT 1');
+    $clientStmt->execute([':id' => $clientId]);
+    $clientName = (string)($clientStmt->fetchColumn() ?: 'Client #' . $clientId);
+
+    $noteText = $note !== '' ? "\nNote client : {$note}" : '';
+    $subject = '[AppCarte] Demande de rattachement fournisseur';
+    $body = "Un client demande le rattachement d'un fournisseur existant.\n\n"
+        . "Demande ID : {$requestId}\n"
+        . "Client : {$clientName}\n"
+        . "Fournisseur : {$supplierName}"
+        . $noteText . "\n\n"
+        . "Ouvre l'admin dans l'onglet Demandes pour traiter cette demande.";
+
+    if (!send_plain_email($to, $subject, $body)) {
+        error_log('AppCarte: notification email failed for link request #' . $requestId);
+    }
+}
+
+function list_supplier_link_requests_for_client(PDO $pdo): void
+{
+    $inputClientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+    $status = trim((string)($_GET['status'] ?? ''));
+
+    $clientId = resolve_effective_client_id(['client_id' => $inputClientId]);
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $sql = 'SELECT lr.id, lr.client_id, lr.requested_by_user_id, lr.supplier_id, lr.note, lr.status, lr.reviewed_by_admin, lr.reviewed_at, lr.review_note, lr.created_at,
+                   cu.username AS requested_by_username, s.name AS supplier_name, s.city AS supplier_city
+            FROM client_supplier_link_requests lr
+            LEFT JOIN client_users cu ON cu.id = lr.requested_by_user_id
+            JOIN suppliers s ON s.id = lr.supplier_id
+            WHERE lr.client_id=:client_id';
+    $params = [':client_id' => $clientId];
+
+    if ($status !== '' && in_array($status, ['pending', 'approved', 'rejected'], true)) {
+        $sql .= ' AND lr.status=:status';
+        $params[':status'] = $status;
+    }
+
+    $sql .= ' ORDER BY lr.created_at DESC, lr.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    json_response(['ok' => true, 'requests' => $stmt->fetchAll()]);
+}
+
+function list_supplier_creation_requests_for_admin(PDO $pdo): void
+{
+    $status = trim((string)($_GET['status'] ?? 'all'));
+    $clientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+
+    $sql = 'SELECT csr.id, csr.client_id, csr.requested_by_user_id, csr.name, csr.supplier_type, csr.activity_text, csr.labels_text, csr.address, csr.city, csr.postal_code, csr.country, csr.phone, csr.email, csr.website, csr.notes, csr.status, csr.approved_supplier_id, csr.reviewed_by_admin, csr.reviewed_at, csr.review_note, csr.created_at, c.name AS client_name, cu.username AS requested_by_username, s.name AS approved_supplier_name
+            FROM client_supplier_creation_requests csr
+            JOIN clients c ON c.id = csr.client_id
+            LEFT JOIN client_users cu ON cu.id = csr.requested_by_user_id
+            LEFT JOIN suppliers s ON s.id = csr.approved_supplier_id
+            WHERE 1=1';
+    $params = [];
+
+    if ($status !== '' && $status !== 'all' && in_array($status, ['pending', 'approved', 'rejected'], true)) {
+        $sql .= ' AND csr.status=:status';
+        $params[':status'] = $status;
+    }
+
+    if ($clientId > 0) {
+        $sql .= ' AND csr.client_id=:client_id';
+        $params[':client_id'] = $clientId;
+    }
+
+    $sql .= ' ORDER BY (csr.status="pending") DESC, csr.created_at DESC, csr.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    json_response(['ok' => true, 'requests' => $stmt->fetchAll()]);
+}
+
+function list_supplier_link_requests_for_admin(PDO $pdo): void
+{
+    $status = trim((string)($_GET['status'] ?? 'all'));
+    $clientId = isset($_GET['client_id']) ? (int)$_GET['client_id'] : 0;
+
+    $sql = 'SELECT lr.id, lr.client_id, lr.requested_by_user_id, lr.supplier_id, lr.note, lr.status, lr.reviewed_by_admin, lr.reviewed_at, lr.review_note, lr.created_at,
+                   c.name AS client_name, cu.username AS requested_by_username, s.name AS supplier_name, s.city AS supplier_city
+            FROM client_supplier_link_requests lr
+            JOIN clients c ON c.id = lr.client_id
+            LEFT JOIN client_users cu ON cu.id = lr.requested_by_user_id
+            JOIN suppliers s ON s.id = lr.supplier_id
+            WHERE 1=1';
+    $params = [];
+
+    if ($status !== '' && $status !== 'all' && in_array($status, ['pending', 'approved', 'rejected'], true)) {
+        $sql .= ' AND lr.status=:status';
+        $params[':status'] = $status;
+    }
+
+    if ($clientId > 0) {
+        $sql .= ' AND lr.client_id=:client_id';
+        $params[':client_id'] = $clientId;
+    }
+
+    $sql .= ' ORDER BY (lr.status="pending") DESC, lr.created_at DESC, lr.id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    json_response(['ok' => true, 'requests' => $stmt->fetchAll()]);
+}
+
+function review_supplier_creation_request(PDO $pdo): void
+{
+    $input = get_json_input();
+    $requestId = isset($input['id']) ? (int)$input['id'] : 0;
+    $decision = trim((string)($input['decision'] ?? ''));
+    $reviewNote = trim((string)($input['review_note'] ?? ''));
+
+    if ($requestId <= 0) {
+        json_response(['ok' => false, 'error' => 'Demande invalide'], 422);
+    }
+    if (!in_array($decision, ['approved', 'rejected'], true)) {
+        json_response(['ok' => false, 'error' => 'Décision invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM client_supplier_creation_requests WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $requestId]);
+    $request = $stmt->fetch();
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Demande introuvable'], 404);
+    }
+    if ((string)$request['status'] !== 'pending') {
+        json_response(['ok' => false, 'error' => 'Cette demande est déjà traitée'], 422);
+    }
+
+    start_app_session();
+    $reviewedBy = (string)($_SESSION['admin_username'] ?? 'admin');
+
+    $approvedSupplierId = null;
+
+    $pdo->beginTransaction();
+    try {
+        if ($decision === 'approved') {
+            $name = trim((string)($request['name'] ?? ''));
+            if ($name === '') {
+                throw new RuntimeException('Nom fournisseur requis pour valider la demande');
+            }
+
+            $insertSupplierSql = 'INSERT INTO suppliers
+                (name, normalized_name, address, city, postal_code, country, phone, email, website, supplier_type, activity_text, notes, slug, is_public, public_updated_at)
+                VALUES
+                (:name, :normalized_name, :address, :city, :postal_code, :country, :phone, :email, :website, :supplier_type, :activity_text, :notes, :slug, 1, NOW())';
+
+            $pdo->prepare($insertSupplierSql)->execute([
+                ':name' => $name,
+                ':normalized_name' => normalize_text($name),
+                ':address' => trim((string)($request['address'] ?? '')),
+                ':city' => trim((string)($request['city'] ?? '')),
+                ':postal_code' => trim((string)($request['postal_code'] ?? '')),
+                ':country' => trim((string)($request['country'] ?? '')),
+                ':phone' => format_phone((string)($request['phone'] ?? '')),
+                ':email' => trim((string)($request['email'] ?? '')),
+                ':website' => trim((string)($request['website'] ?? '')),
+                ':supplier_type' => trim((string)($request['supplier_type'] ?? '')),
+                ':activity_text' => supplier_field_for_change_request('activity_text', (string)($request['activity_text'] ?? '')),
+                ':notes' => trim((string)($request['notes'] ?? '')),
+                ':slug' => slugify_text($name),
+            ]);
+
+            $approvedSupplierId = (int)$pdo->lastInsertId();
+
+            $pdo->prepare('INSERT IGNORE INTO client_suppliers (client_id, supplier_id) VALUES (:client_id, :supplier_id)')
+                ->execute([
+                    ':client_id' => (int)$request['client_id'],
+                    ':supplier_id' => $approvedSupplierId,
+                ]);
+
+            $pdo->prepare('INSERT INTO client_supplier_profiles (client_id, supplier_id, activity_text, labels_text, notes, relationship_status, updated_by_type, updated_by_id)
+                VALUES (:client_id, :supplier_id, :activity_text, :labels_text, :notes, "active", "admin", NULL)
+                ON DUPLICATE KEY UPDATE activity_text=VALUES(activity_text), labels_text=VALUES(labels_text), notes=VALUES(notes), relationship_status="active", updated_by_type="admin", updated_by_id=NULL')
+                ->execute([
+                    ':client_id' => (int)$request['client_id'],
+                    ':supplier_id' => $approvedSupplierId,
+                    ':activity_text' => supplier_field_for_change_request('activity_text', (string)($request['activity_text'] ?? '')),
+                    ':labels_text' => supplier_field_for_change_request('labels', (string)($request['labels_text'] ?? '')),
+                    ':notes' => trim((string)($request['notes'] ?? '')),
+                ]);
+
+            sync_supplier_labels($pdo, $approvedSupplierId, parse_csv_list((string)($request['labels_text'] ?? '')));
+
+            write_supplier_audit(
+                $pdo,
+                $approvedSupplierId,
+                'creation_request_approved_create_supplier',
+                null,
+                null,
+                $name,
+                ['request_id' => $requestId, 'client_id' => (int)$request['client_id']]
+            );
+        }
+
+        $pdo->prepare('UPDATE client_supplier_creation_requests
+            SET status=:status,
+                approved_supplier_id=:approved_supplier_id,
+                reviewed_by_admin=:reviewed_by_admin,
+                reviewed_at=NOW(),
+                review_note=:review_note
+            WHERE id=:id')
+            ->execute([
+                ':status' => $decision,
+                ':approved_supplier_id' => $approvedSupplierId,
+                ':reviewed_by_admin' => $reviewedBy,
+                ':review_note' => $reviewNote,
+                ':id' => $requestId,
+            ]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    json_response(['ok' => true]);
+}
+
+function review_supplier_link_request(PDO $pdo): void
+{
+    $input = get_json_input();
+    $requestId = isset($input['id']) ? (int)$input['id'] : 0;
+    $decision = trim((string)($input['decision'] ?? ''));
+    $reviewNote = trim((string)($input['review_note'] ?? ''));
+
+    if ($requestId <= 0) {
+        json_response(['ok' => false, 'error' => 'Demande invalide'], 422);
+    }
+    if (!in_array($decision, ['approved', 'rejected'], true)) {
+        json_response(['ok' => false, 'error' => 'Décision invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM client_supplier_link_requests WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $requestId]);
+    $request = $stmt->fetch();
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Demande introuvable'], 404);
+    }
+    if ((string)$request['status'] !== 'pending') {
+        json_response(['ok' => false, 'error' => 'Cette demande est déjà traitée'], 422);
+    }
+
+    start_app_session();
+    $reviewedBy = (string)($_SESSION['admin_username'] ?? 'admin');
+
+    $pdo->beginTransaction();
+    try {
+        if ($decision === 'approved') {
+            $pdo->prepare('INSERT IGNORE INTO client_suppliers (client_id, supplier_id, source) VALUES (:client_id, :supplier_id, "link_request")')
+                ->execute([
+                    ':client_id' => (int)$request['client_id'],
+                    ':supplier_id' => (int)$request['supplier_id'],
+                ]);
+
+            $pdo->prepare('INSERT INTO client_supplier_profiles (client_id, supplier_id, relationship_status, updated_by_type, updated_by_id)
+                VALUES (:client_id, :supplier_id, "active", "admin", NULL)
+                ON DUPLICATE KEY UPDATE updated_by_type="admin", updated_by_id=NULL')
+                ->execute([
+                    ':client_id' => (int)$request['client_id'],
+                    ':supplier_id' => (int)$request['supplier_id'],
+                ]);
+
+            write_supplier_audit(
+                $pdo,
+                (int)$request['supplier_id'],
+                'link_request_approved_attach_client',
+                null,
+                null,
+                (string)$request['client_id'],
+                ['request_id' => $requestId, 'client_id' => (int)$request['client_id']]
+            );
+        }
+
+        $pdo->prepare('UPDATE client_supplier_link_requests
+            SET status=:status,
+                reviewed_by_admin=:reviewed_by_admin,
+                reviewed_at=NOW(),
+                review_note=:review_note
+            WHERE id=:id')
+            ->execute([
+                ':status' => $decision,
+                ':reviewed_by_admin' => $reviewedBy,
+                ':review_note' => $reviewNote,
+                ':id' => $requestId,
+            ]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    json_response(['ok' => true]);
+}
+
 function save_supplier_change_request(PDO $pdo): void
 {
     assert_client_can_create_change_request();
@@ -1673,12 +3461,10 @@ function save_supplier_change_request(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'La nouvelle valeur est identique à la valeur actuelle'], 422);
     }
 
-    $actor = current_actor_context();
-    $requestedByUserId = $actor['actor_type'] === 'client_user' && $actor['actor_id'] !== null
-        ? (int)$actor['actor_id']
-        : 0;
+    $requestedByUserId = resolve_change_request_user_id($pdo, $clientId);
+
     if ($requestedByUserId <= 0) {
-        json_response(['ok' => false, 'error' => 'Session client invalide'], 401);
+        json_response(['ok' => false, 'error' => 'Aucun utilisateur client actif trouvé pour ce client (crée un compte client actif).'], 422);
     }
 
     $pdo->prepare('INSERT INTO supplier_change_requests (supplier_id, client_id, requested_by_user_id, field_name, old_value, new_value, status) VALUES (:supplier_id, :client_id, :requested_by_user_id, :field_name, :old_value, :new_value, "pending")')
@@ -1690,6 +3476,9 @@ function save_supplier_change_request(PDO $pdo): void
             ':old_value' => $oldValue,
             ':new_value' => $newValue,
         ]);
+
+    $requestId = (int)$pdo->lastInsertId();
+    notify_admin_new_change_request($pdo, $requestId, $supplierId, $clientId, $fieldName, $oldValue, $newValue);
 
     write_supplier_audit($pdo, $supplierId, 'change_request_created', $fieldName, $oldValue, $newValue, ['client_id' => $clientId]);
 
@@ -1808,8 +3597,10 @@ function apply_change_request_decision(PDO $pdo, array $request, int $requestId,
 
         if ($fieldName === 'labels') {
             sync_supplier_labels($pdo, (int)$request['supplier_id'], parse_csv_list($newValue));
+            $pdo->prepare('UPDATE suppliers SET public_updated_at=NOW() WHERE id=:supplier_id')
+                ->execute([':supplier_id' => (int)$request['supplier_id']]);
         } else {
-            $sql = 'UPDATE suppliers SET ' . $fieldName . '=:new_value WHERE id=:supplier_id';
+            $sql = 'UPDATE suppliers SET ' . $fieldName . '=:new_value, public_updated_at=NOW() WHERE id=:supplier_id';
             $pdo->prepare($sql)->execute([
                 ':new_value' => $newValue,
                 ':supplier_id' => (int)$request['supplier_id'],
@@ -1910,8 +3701,16 @@ function map_data(PDO $pdo): void
     }
 
     $clients = $pdo->query('SELECT id, name, client_type, latitude, longitude, logo_url, city, address, postal_code, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
+    $clients = array_map(function (array $client) use ($pdo): array {
+        $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
+        return $client;
+    }, $clients);
 
     $activities = $pdo->query('SELECT name, family, icon_url FROM activities WHERE is_active=1')->fetchAll();
+    $activities = array_map(function (array $activity) use ($pdo): array {
+        $activity['icon_url'] = absolutize_export_url($pdo, (string)($activity['icon_url'] ?? ''));
+        return $activity;
+    }, $activities);
     $labels = $pdo->query('SELECT name, color FROM labels WHERE is_active=1')->fetchAll();
 
     $sql = "SELECT
@@ -1974,10 +3773,10 @@ function map_data(PDO $pdo): void
         'ok' => true,
         'source' => 'db',
         'org_name' => $settings['org_name'] ?? '',
-        'org_logo_url' => $settings['org_logo_url'] ?? '',
-        'default_client_icon' => $settings['default_client_icon'] ?? '',
-        'default_producer_icon' => $settings['default_producer_icon'] ?? '',
-        'farm_direct_icon' => $settings['farm_direct_icon'] ?? '',
+        'org_logo_url' => absolutize_export_url($pdo, (string)($settings['org_logo_url'] ?? '')),
+        'default_client_icon' => absolutize_export_url($pdo, (string)($settings['default_client_icon'] ?? '')),
+        'default_producer_icon' => absolutize_export_url($pdo, (string)($settings['default_producer_icon'] ?? '')),
+        'farm_direct_icon' => absolutize_export_url($pdo, (string)($settings['farm_direct_icon'] ?? '')),
         'clients' => $clients,
         'data' => $allData,
         'icon_map_norm' => $iconMapNorm,

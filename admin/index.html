@@ -41,9 +41,10 @@
         <button class="tab-btn" data-tab="labels" type="button">Labels</button>
         <button class="tab-btn" data-tab="types" type="button">Types</button>
         <button class="tab-btn" data-tab="suppliers" type="button">Fournisseurs</button>
+        <button class="tab-btn" data-tab="users" type="button">Utilisateurs</button>
         <button class="tab-btn" data-tab="requests" type="button">Demandes</button>
         <button class="tab-btn" data-tab="import" type="button">Import</button>
-        <button class="tab-btn" data-tab="visual" type="button">Visuel</button>
+        <button class="tab-btn" data-tab="visual" type="button">Paramètres</button>
       </div>
     </div>
 
@@ -58,12 +59,17 @@
         <label>Email <input id="clientEmail" /></label>
         <label>Téléphone <input id="clientPhone" /></label>
         <label>Site web <input id="clientWebsite" /></label>
+        <label>Slug public <input id="clientSlug" placeholder="genere automatiquement si vide" /></label>
+        <label>Facebook <input id="clientFacebook" placeholder="https://facebook.com/..." /></label>
+        <label>Instagram <input id="clientInstagram" placeholder="https://instagram.com/..." /></label>
+        <label>LinkedIn <input id="clientLinkedin" placeholder="https://linkedin.com/..." /></label>
         <label>Logo fichier (upload)
           <input id="clientLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
         </label>
         <label>Logo enregistré
           <input id="clientLogoPath" readonly placeholder="Upload un fichier image" />
         </label>
+        <label>Image de couverture (URL) <input id="clientCoverUrl" placeholder="https://..." /></label>
         <label>Adresse <input id="clientAddress" /></label>
         <label>Ville <input id="clientCity" /></label>
         <label>Code postal <input id="clientPostal" /></label>
@@ -71,6 +77,18 @@
         <label>Latitude <input id="clientLat" /></label>
         <label>Longitude <input id="clientLng" /></label>
       </form>
+      <div class="grid-2" style="margin-top:8px;">
+        <label>Texte court
+          <textarea id="clientDescriptionShort" rows="3" placeholder="Petit texte pour listing / carte / resume"></textarea>
+        </label>
+        <label>Texte long
+          <textarea id="clientDescriptionLong" rows="6" placeholder="Presentation detaillee pour la page WordPress"></textarea>
+        </label>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="clientIsPublic" type="checkbox" checked />
+        Visible dans l'export site WordPress
+      </label>
       <div class="hours-grid" style="margin-top:8px;">
         <label>Lundi
           <textarea id="clientMonday" rows="2" placeholder="08:00-12:00&#10;14:00-19:00"></textarea>
@@ -102,42 +120,12 @@
       </div>
       <div class="row" style="margin-top:10px;">
         <button id="btnSaveClient" class="primary">Enregistrer client</button>
+        <button id="btnExportClients" type="button">Exporter clients CSV</button>
         <span id="clientMsg" class="muted"></span>
       </div>
       <div id="clientsTable"></div>
     </div>
 
-    <div class="card" style="margin-top:10px;">
-      <h3>Comptes utilisateurs client</h3>
-      <form id="formClientUser" class="grid-2">
-        <input type="hidden" id="clientUserId" />
-        <label>Client
-          <select id="clientUserClientId"></select>
-        </label>
-        <label>Nom utilisateur
-          <input id="clientUserUsername" placeholder="ex: amap_labenne" />
-        </label>
-        <label>Rôle
-          <select id="clientUserRole">
-            <option value="client_manager">client_manager</option>
-            <option value="client_editor">client_editor</option>
-            <option value="client_reader">client_reader</option>
-          </select>
-        </label>
-        <label>Mot de passe (laisser vide pour conserver l'actuel en édition)
-          <input id="clientUserPassword" type="password" placeholder="8 caractères minimum" />
-        </label>
-      </form>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-        <input id="clientUserIsActive" type="checkbox" checked />
-        Compte actif
-      </label>
-      <div class="row" style="margin-top:10px;">
-        <button id="btnSaveClientUser" class="primary" type="button">Enregistrer utilisateur client</button>
-        <span id="clientUserMsg" class="muted"></span>
-      </div>
-      <div id="clientUsersTable"></div>
-    </div>
     </section>
 
     <section id="panel-visual" class="tab-panel">
@@ -149,12 +137,115 @@
         <label>Icône client par défaut (URL ou /assets/...) <input id="visDefaultClient" /></label>
         <label>Icône producteur par défaut (URL ou /assets/...) <input id="visDefaultProducer" /></label>
         <label>Icône “vente directe ferme” (URL ou /assets/...) <input id="visFarmDirect" /></label>
+        <label>Emails notification demandes (séparés par virgules)
+          <input id="visAdminNotificationEmails" placeholder="admin@exemple.fr, equipe@exemple.fr" />
+        </label>
+        <label>URL publique des assets
+          <input id="visPublicAssetsBaseUrl" placeholder="https://limap.fr" />
+        </label>
+        <label>SMTP host
+          <input id="visSmtpHost" placeholder="smtp.gmail.com" />
+        </label>
+        <label>SMTP port
+          <input id="visSmtpPort" placeholder="587" />
+        </label>
+        <label>SMTP chiffrement
+          <select id="visSmtpEncryption">
+            <option value="">Aucun</option>
+            <option value="tls">TLS (STARTTLS)</option>
+            <option value="ssl">SSL</option>
+          </select>
+        </label>
+        <label>SMTP utilisateur
+          <input id="visSmtpUsername" placeholder="utilisateur@example.com" />
+        </label>
+        <label>SMTP mot de passe
+          <input id="visSmtpPassword" type="password" placeholder="mot de passe / app password" />
+        </label>
+        <label>Email expéditeur
+          <input id="visSmtpFromEmail" placeholder="noreply@limap.fr" />
+        </label>
+        <label>Nom expéditeur
+          <input id="visSmtpFromName" placeholder="LIMAP" />
+        </label>
+        <label>Email test (optionnel)
+          <input id="visSmtpTestTo" placeholder="si vide: emails notification" />
+        </label>
       </div>
       <div class="row" style="margin-top:8px;">
         <button id="btnSaveVisual" class="primary">Enregistrer paramètres visuels</button>
+        <button id="btnTestNotification" type="button">Tester envoi mail</button>
         <span id="visualMsg" class="muted"></span>
       </div>
     </div>
+
+    </section>
+
+    <section id="panel-users" class="tab-panel">
+      <div class="card">
+        <h3>Comptes utilisateurs client</h3>
+        <form id="formClientUser" class="grid-2">
+          <input type="hidden" id="clientUserId" />
+          <label>Client
+            <select id="clientUserClientId"></select>
+          </label>
+          <label>Nom utilisateur
+            <input id="clientUserUsername" placeholder="ex: amap_labenne" />
+          </label>
+          <label>Email
+            <input id="clientUserEmail" type="email" placeholder="utilisateur@domaine.fr" />
+          </label>
+          <label>Rôle
+            <select id="clientUserRole">
+              <option value="client_manager">client_manager</option>
+              <option value="client_editor">client_editor</option>
+              <option value="client_reader">client_reader</option>
+            </select>
+          </label>
+          <label>Mot de passe (laisser vide pour conserver l'actuel en édition)
+            <input id="clientUserPassword" type="password" placeholder="8 caractères minimum" />
+          </label>
+        </form>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input id="clientUserIsActive" type="checkbox" checked />
+          Compte actif
+        </label>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSaveClientUser" class="primary" type="button">Enregistrer utilisateur client</button>
+          <span id="clientUserMsg" class="muted"></span>
+        </div>
+        <div id="clientUsersTable"></div>
+      </div>
+
+      <div class="card" style="margin-top:10px;">
+        <h3>Utilisateurs admin</h3>
+        <form id="formAdminUser" class="grid-2">
+          <input type="hidden" id="adminUserId" />
+          <label>Nom utilisateur admin
+            <input id="adminUserUsername" placeholder="ex: admin_principal" />
+          </label>
+          <label>Email
+            <input id="adminUserEmail" type="email" placeholder="admin@domaine.fr" />
+          </label>
+          <label>Mot de passe (laisser vide pour conserver l'actuel en édition)
+            <input id="adminUserPassword" type="password" placeholder="12 caractères min, mot de passe fort" />
+          </label>
+        </form>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input id="adminUserIsActive" type="checkbox" checked />
+          Compte admin actif
+        </label>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSaveAdminUser" class="primary" type="button">Enregistrer utilisateur admin</button>
+          <span id="adminUserMsg" class="muted"></span>
+        </div>
+        <div id="adminUsersTable"></div>
+      </div>
+
+      <div class="card" style="margin-top:10px;">
+        <h3>Historique envois reset</h3>
+        <div id="resetAuditTable"></div>
+      </div>
     </section>
 
     <section id="panel-activities" class="tab-panel">
@@ -218,12 +309,34 @@
       <form id="formSupplier" class="grid">
         <input type="hidden" id="supplierId" />
         <label>Nom <input id="supplierName" required /></label>
-        <label>Type <input id="supplierType" /></label>
-        <label>Activités (séparées par ;) <input id="supplierActivities" /></label>
-        <label>Labels (séparés par ;) <input id="supplierLabels" /></label>
+        <label>Type
+          <select id="supplierType">
+            <option value="">Sélectionner un type</option>
+          </select>
+        </label>
+        <label>Catégories / activités
+          <input type="hidden" id="supplierActivities" />
+          <div class="multi-picker supplier-picker-box">
+            <div id="supplierActivitiesChips" class="multi-chip-list"></div>
+            <select id="supplierActivitiesSelect"></select>
+          </div>
+        </label>
+        <label>Labels
+          <input type="hidden" id="supplierLabels" />
+          <div class="multi-picker supplier-picker-box">
+            <div id="supplierLabelsChips" class="multi-chip-list"></div>
+            <select id="supplierLabelsSelect"></select>
+          </div>
+        </label>
         <label>Téléphone <input id="supplierPhone" /></label>
         <label>Email <input id="supplierEmail" /></label>
         <label>Site web <input id="supplierWebsite" /></label>
+        <label>Slug public <input id="supplierSlug" placeholder="genere automatiquement si vide" /></label>
+        <label>Facebook <input id="supplierFacebook" placeholder="https://facebook.com/..." /></label>
+        <label>Instagram <input id="supplierInstagram" placeholder="https://instagram.com/..." /></label>
+        <label>LinkedIn <input id="supplierLinkedin" placeholder="https://linkedin.com/..." /></label>
+        <label>Logo (URL) <input id="supplierLogoUrl" placeholder="https://..." /></label>
+        <label>Image de couverture (URL) <input id="supplierCoverUrl" placeholder="https://..." /></label>
         <label>Adresse <input id="supplierAddress" /></label>
         <label>Ville <input id="supplierCity" /></label>
         <label>Code postal <input id="supplierPostal" /></label>
@@ -231,6 +344,18 @@
         <label>Latitude <input id="supplierLat" /></label>
         <label>Longitude <input id="supplierLng" /></label>
       </form>
+      <div class="grid-2" style="margin-top:8px;">
+        <label>Texte court
+          <textarea id="supplierDescriptionShort" rows="3" placeholder="Petit texte pour la carte / listing WordPress"></textarea>
+        </label>
+        <label>Texte long
+          <textarea id="supplierDescriptionLong" rows="6" placeholder="Presentation detaillee pour la page producteur WordPress"></textarea>
+        </label>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="supplierIsPublic" type="checkbox" checked />
+        Visible dans l'export WordPress des producteurs
+      </label>
       <label style="margin-top:8px;">Clients liés (multi-sélection)
         <select id="supplierClients" multiple size="6"></select>
       </label>
@@ -240,7 +365,36 @@
       </div>
       <div class="row" style="margin-top:8px;">
         <button id="btnSaveSupplier" class="primary">Enregistrer fournisseur</button>
+        <button id="btnExportProducersAll" type="button">Exporter fournisseurs CSV</button>
+        <button id="btnExportProducersChanged" type="button">Exporter fournisseurs modifiés</button>
         <span id="supplierMsg" class="muted"></span>
+      </div>
+      <div class="card" style="margin-top:10px;">
+        <h4 style="margin:0 0 8px;">Filtres fournisseurs</h4>
+        <div class="grid-2">
+          <label>Recherche
+            <input id="supplierFilterText" placeholder="Nom, ville, email, téléphone..." />
+          </label>
+          <label>Client (AMAP)
+            <select id="supplierFilterClient">
+              <option value="">Tous les clients</option>
+            </select>
+          </label>
+          <label>Catégorie / activité
+            <select id="supplierFilterActivity">
+              <option value="">Toutes les catégories</option>
+            </select>
+          </label>
+          <label>Type
+            <select id="supplierFilterType">
+              <option value="">Tous les types</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnResetSupplierFilters" type="button">Réinitialiser filtres</button>
+          <span id="supplierFilterSummary" class="muted"></span>
+        </div>
       </div>
       <div id="suppliersTable"></div>
     </div>
@@ -289,6 +443,14 @@
         </div>
         <div id="requestMsg" class="muted" style="margin-top:8px;"></div>
         <div id="requestsTable" style="margin-top:8px;"></div>
+
+        <h3 style="margin-top:16px;">Demandes de création de fournisseurs</h3>
+        <div id="supplierCreateRequestSummary" class="muted" style="margin-top:4px;"></div>
+        <div id="supplierCreateRequestsTable" style="margin-top:8px;"></div>
+
+        <h3 style="margin-top:16px;">Demandes de rattachement client-fournisseur</h3>
+        <div id="supplierLinkRequestSummary" class="muted" style="margin-top:4px;"></div>
+        <div id="supplierLinkRequestsTable" style="margin-top:8px;"></div>
       </div>
     </section>
 

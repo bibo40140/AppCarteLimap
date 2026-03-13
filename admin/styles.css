@@ -61,9 +61,10 @@ th, td { border-bottom: 1px solid #eceff4; text-align: left; padding: 8px; verti
 .excel-source-note { margin-top: 4px; font-size: 11px; color: #64748b; }
 .import-grid input[readonly][data-edit-row] { background: #fffdf5; color: #374151; }
 .multi-picker { display: grid; gap: 4px; }
+.supplier-picker-box { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #f8fafc; }
 .multi-chip-list { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
 .multi-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; font-size: 11px; color: #334155; }
-.multi-chip-remove { border: none; background: transparent; color: #64748b; cursor: pointer; padding: 0; line-height: 1; font-size: 12px; }
+.multi-chip-remove { color: #64748b; cursor: pointer; padding: 0 1px; line-height: 1; font-size: 12px; user-select: none; }
 .multi-chip-remove:hover { color: #ef4444; }
 .preflight-grid-wrap { overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
 .preflight-grid { min-width: 1000px; width: 100%; border-collapse: collapse; font-size: 12px; }
