@@ -42,6 +42,7 @@
         <button class="tab-btn" data-tab="types" type="button">Types</button>
         <button class="tab-btn" data-tab="suppliers" type="button">Fournisseurs</button>
         <button class="tab-btn" data-tab="users" type="button">Utilisateurs</button>
+        <button class="tab-btn" data-tab="traces" type="button">Traces</button>
         <button class="tab-btn" data-tab="requests" type="button">Demandes</button>
         <button class="tab-btn" data-tab="import" type="button">Import</button>
         <button class="tab-btn" data-tab="visual" type="button">Paramètres</button>
@@ -245,6 +246,41 @@
       <div class="card" style="margin-top:10px;">
         <h3>Historique envois reset</h3>
         <div id="resetAuditTable"></div>
+      </div>
+    </section>
+
+    <section id="panel-traces" class="tab-panel">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <h3>Traces connexions et actions</h3>
+          <button id="btnReloadAuditLogs" type="button">Rafraîchir</button>
+        </div>
+        <div class="grid-2">
+          <label>Filtre texte
+            <input id="auditFilterText" placeholder="acteur, action, cible, IP..." />
+          </label>
+          <label>Type d'acteur
+            <select id="auditFilterActorType">
+              <option value="">Tous</option>
+              <option value="admin">admin</option>
+              <option value="client_user">client_user</option>
+              <option value="anonymous">anonymous</option>
+            </select>
+          </label>
+          <label>Nature de trace
+            <select id="auditFilterKind">
+              <option value="">Toutes</option>
+              <option value="visit">Visites</option>
+              <option value="action">Actions</option>
+              <option value="auth">Authentification</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <span id="auditSummary" class="muted"></span>
+          <span id="auditMsg" class="muted"></span>
+        </div>
+        <div id="auditLogsTable" style="margin-top:8px;"></div>
       </div>
     </section>
 

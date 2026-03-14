@@ -116,6 +116,14 @@ try {
             reset_client_user_password($pdo);
             break;
 
+        case 'admin/client-user/delete':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            delete_client_user($pdo);
+            break;
+
         case 'admin/client-user/send-reset-link':
             require_admin();
             if ($method !== 'POST') {
@@ -146,6 +154,14 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             reset_admin_user_password($pdo);
+            break;
+
+        case 'admin/admin-user/delete':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            delete_admin_user($pdo);
             break;
 
         case 'admin/admin-user/send-reset-link':
@@ -274,6 +290,19 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             commit_import($pdo);
+            break;
+
+        case 'admin/audit/list':
+            require_admin();
+            list_admin_audit_logs($pdo);
+            break;
+
+        case 'audit/ui-event':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            track_ui_event($pdo);
             break;
 
         case 'client/bootstrap':
@@ -422,6 +451,13 @@ function login(PDO $pdo): void
     $password = (string)($input['password'] ?? '');
 
     if ($username === '' || $password === '') {
+        write_admin_audit($pdo, 'auth_login_failed', [
+            'actor_type' => 'anonymous',
+            'actor_name' => $username !== '' ? $username : 'anonymous',
+            'target_type' => 'auth',
+            'target_label' => 'login',
+            'details' => ['reason' => 'missing_credentials'],
+        ]);
         json_response(['ok' => false, 'error' => 'Identifiants invalides'], 401);
     }
 
@@ -450,6 +486,14 @@ function login(PDO $pdo): void
         if ($adminRow) {
             $pdo->prepare('UPDATE admin_users SET last_login_at=NOW() WHERE id=:id')->execute([':id' => (int)$adminRow['id']]);
         }
+        write_admin_audit($pdo, 'auth_login_success', [
+            'actor_type' => 'admin',
+            'actor_id' => $adminRow ? (int)$adminRow['id'] : null,
+            'actor_name' => (string)($_SESSION['admin_username'] ?? $username),
+            'target_type' => 'auth',
+            'target_label' => 'login',
+            'details' => ['auth_role' => 'admin'],
+        ]);
         json_response(['ok' => true, 'username' => (string)($_SESSION['admin_username'] ?? $username), 'role' => 'admin']);
     }
 
@@ -458,6 +502,13 @@ function login(PDO $pdo): void
     $row = $stmt->fetch();
 
     if (!$row || (int)$row['is_active'] !== 1 || !password_verify($password, (string)$row['password_hash'])) {
+        write_admin_audit($pdo, 'auth_login_failed', [
+            'actor_type' => 'anonymous',
+            'actor_name' => $username,
+            'target_type' => 'auth',
+            'target_label' => 'login',
+            'details' => ['reason' => 'invalid_credentials'],
+        ]);
         json_response(['ok' => false, 'error' => 'Identifiants invalides'], 401);
     }
 
@@ -473,6 +524,15 @@ function login(PDO $pdo): void
     $_SESSION['client_name'] = (string)$row['client_name'];
     unset($_SESSION['admin_username'], $_SESSION['admin_user_id']);
 
+    write_admin_audit($pdo, 'auth_login_success', [
+        'actor_type' => 'client_user',
+        'actor_id' => (int)$row['id'],
+        'actor_name' => (string)$row['username'],
+        'target_type' => 'auth',
+        'target_label' => 'login',
+        'details' => ['auth_role' => (string)$row['role'], 'client_id' => (int)$row['client_id']],
+    ]);
+
     json_response([
         'ok' => true,
         'username' => (string)$row['username'],
@@ -484,6 +544,16 @@ function login(PDO $pdo): void
 
 function logout(): void
 {
+    try {
+        $pdo = get_db();
+        write_admin_audit($pdo, 'auth_logout', [
+            'target_type' => 'auth',
+            'target_label' => 'logout',
+        ]);
+    } catch (Throwable $e) {
+        error_log('AppCarte: logout audit failed: ' . $e->getMessage());
+    }
+
     start_app_session();
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
@@ -513,10 +583,12 @@ function auth_me(): void
 
 function admin_bootstrap(PDO $pdo): void
 {
+    ensure_admin_audit_log_table($pdo);
     $clients = $pdo->query('SELECT * FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
     $clientUsers = $pdo->query('SELECT cu.id, cu.client_id, cu.username, cu.email, cu.role, cu.is_active, cu.last_login_at, cu.created_at, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id ORDER BY c.name, cu.username')->fetchAll();
     $adminUsers = $pdo->query('SELECT id, username, email, is_active, last_login_at, created_at FROM admin_users ORDER BY username')->fetchAll();
     $resetAudit = $pdo->query('SELECT id, user_type, user_id, username, email, status, error_message, created_at FROM password_reset_audit ORDER BY id DESC LIMIT 30')->fetchAll();
+    $auditLogs = $pdo->query('SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log ORDER BY id DESC LIMIT 150')->fetchAll();
     $activities = $pdo->query('SELECT * FROM activities ORDER BY family, name')->fetchAll();
     $labels = $pdo->query('SELECT * FROM labels ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT * FROM supplier_types ORDER BY name')->fetchAll();
@@ -582,8 +654,179 @@ function admin_bootstrap(PDO $pdo): void
         'suppliers' => $suppliers,
         'settings' => $settings,
         'password_reset_audit' => $resetAudit,
+        'audit_logs' => $auditLogs,
         'supplier_link_request_pending_count' => $linkRequestPending,
     ]);
+}
+
+function ensure_admin_audit_log_table(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $pdo->exec('CREATE TABLE IF NOT EXISTS admin_audit_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        actor_type VARCHAR(30) NOT NULL,
+        actor_id INT NULL,
+        actor_name VARCHAR(190) NULL,
+        action_name VARCHAR(80) NOT NULL,
+        target_type VARCHAR(40) NULL,
+        target_id INT NULL,
+        target_label VARCHAR(255) NULL,
+        details_json JSON NULL,
+        ip_address VARCHAR(64) NULL,
+        user_agent VARCHAR(255) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_admin_audit_created_at (created_at),
+        INDEX idx_admin_audit_actor (actor_type, actor_id),
+        INDEX idx_admin_audit_action (action_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+
+    $checked = true;
+}
+
+function truncate_audit_string(?string $value, int $maxLen): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    $value = trim($value);
+    if ($value === '') {
+        return null;
+    }
+    if (mb_strlen($value, 'UTF-8') <= $maxLen) {
+        return $value;
+    }
+    return mb_substr($value, 0, $maxLen - 1, 'UTF-8') . '…';
+}
+
+function write_admin_audit(PDO $pdo, string $actionName, array $data = []): void
+{
+    try {
+        ensure_admin_audit_log_table($pdo);
+        start_app_session();
+        $actor = current_actor_context();
+
+        $actorType = (string)($data['actor_type'] ?? ($actor['actor_type'] ?? 'unknown'));
+        $actorId = $data['actor_id'] ?? ($actor['actor_id'] ?? null);
+        $actorName = (string)($data['actor_name'] ?? ($actor['actor_name'] ?? 'unknown'));
+
+        $targetType = isset($data['target_type']) ? (string)$data['target_type'] : null;
+        $targetId = isset($data['target_id']) ? (int)$data['target_id'] : null;
+        $targetLabel = isset($data['target_label']) ? (string)$data['target_label'] : null;
+        $details = isset($data['details']) && is_array($data['details']) ? $data['details'] : [];
+
+        $ipAddress = truncate_audit_string((string)($_SERVER['REMOTE_ADDR'] ?? ''), 64);
+        $userAgent = truncate_audit_string((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 255);
+
+        $pdo->prepare('INSERT INTO admin_audit_log (actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent) VALUES (:actor_type, :actor_id, :actor_name, :action_name, :target_type, :target_id, :target_label, :details_json, :ip_address, :user_agent)')
+            ->execute([
+                ':actor_type' => truncate_audit_string($actorType, 30) ?? 'unknown',
+                ':actor_id' => $actorId !== null ? (int)$actorId : null,
+                ':actor_name' => truncate_audit_string($actorName, 190),
+                ':action_name' => truncate_audit_string($actionName, 80) ?? 'unknown_action',
+                ':target_type' => truncate_audit_string($targetType, 40),
+                ':target_id' => $targetId,
+                ':target_label' => truncate_audit_string($targetLabel, 255),
+                ':details_json' => !empty($details) ? json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+                ':ip_address' => $ipAddress,
+                ':user_agent' => $userAgent,
+            ]);
+    } catch (Throwable $e) {
+        error_log('AppCarte: failed to write admin_audit_log: ' . $e->getMessage());
+    }
+}
+
+function list_admin_audit_logs(PDO $pdo): void
+{
+    ensure_admin_audit_log_table($pdo);
+
+    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 150;
+    if ($limit <= 0) {
+        $limit = 150;
+    }
+    $limit = min($limit, 500);
+
+    $action = trim((string)($_GET['action_name'] ?? ''));
+    $actorType = trim((string)($_GET['actor_type'] ?? ''));
+
+    $sql = 'SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log WHERE 1=1';
+    $params = [];
+
+    if ($action !== '') {
+        $sql .= ' AND action_name=:action_name';
+        $params[':action_name'] = $action;
+    }
+    if ($actorType !== '') {
+        $sql .= ' AND actor_type=:actor_type';
+        $params[':actor_type'] = $actorType;
+    }
+
+    $sql .= ' ORDER BY id DESC LIMIT ' . $limit;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    json_response(['ok' => true, 'logs' => $stmt->fetchAll()]);
+}
+
+function track_ui_event(PDO $pdo): void
+{
+    $input = get_json_input();
+    $eventName = trim((string)($input['event_name'] ?? ''));
+    $eventType = trim((string)($input['event_type'] ?? 'visit'));
+    $app = trim((string)($input['app'] ?? ''));
+    $page = trim((string)($input['page'] ?? ''));
+    $tab = trim((string)($input['tab'] ?? ''));
+
+    if ($eventName === '') {
+        json_response(['ok' => false, 'error' => 'event_name requis'], 422);
+    }
+
+    if (!preg_match('/^[a-z0-9_:\-\.]{2,80}$/i', $eventName)) {
+        json_response(['ok' => false, 'error' => 'event_name invalide'], 422);
+    }
+
+    if (!in_array($eventType, ['visit', 'action'], true)) {
+        $eventType = 'visit';
+    }
+
+    // Deduplicate bursts (same event in less than 2 seconds from same session).
+    start_app_session();
+    $signature = implode('|', [$eventType, $eventName, $app, $page, $tab]);
+    $lastSig = (string)($_SESSION['last_ui_event_signature'] ?? '');
+    $lastTs = (int)($_SESSION['last_ui_event_ts'] ?? 0);
+    if ($signature === $lastSig && (time() - $lastTs) < 2) {
+        json_response(['ok' => true, 'deduped' => true]);
+    }
+    $_SESSION['last_ui_event_signature'] = $signature;
+    $_SESSION['last_ui_event_ts'] = time();
+
+    $targetLabelParts = array_values(array_filter([$app, $page, $tab], static fn($v) => trim((string)$v) !== ''));
+    $targetLabel = $targetLabelParts ? implode(' / ', $targetLabelParts) : null;
+
+    $details = [];
+    if ($app !== '') {
+        $details['app'] = $app;
+    }
+    if ($page !== '') {
+        $details['page'] = $page;
+    }
+    if ($tab !== '') {
+        $details['tab'] = $tab;
+    }
+    if (isset($input['meta']) && is_array($input['meta'])) {
+        $details['meta'] = $input['meta'];
+    }
+
+    write_admin_audit($pdo, $eventName, [
+        'target_type' => $eventType,
+        'target_label' => $targetLabel,
+        'details' => $details,
+    ]);
+
+    json_response(['ok' => true]);
 }
 
 function save_client(PDO $pdo): void
@@ -757,6 +1000,22 @@ function export_producers_csv(PDO $pdo): void
                 s.updated_at
             FROM suppliers s
             WHERE " . implode(' AND ', $where) . "
+                            AND (
+                                        NOT EXISTS (
+                                                SELECT 1
+                                                FROM client_suppliers cs0
+                                                WHERE cs0.supplier_id = s.id
+                                        )
+                                        OR EXISTS (
+                                                SELECT 1
+                                                FROM client_suppliers cs1
+                                                LEFT JOIN client_supplier_profiles csp1
+                                                    ON csp1.client_id = cs1.client_id
+                                                 AND csp1.supplier_id = cs1.supplier_id
+                                                WHERE cs1.supplier_id = s.id
+                                                    AND COALESCE(csp1.relationship_status, 'active') <> 'inactive'
+                                        )
+                            )
             ORDER BY s.name";
 
     $stmt = $pdo->prepare($sql);
@@ -843,6 +1102,12 @@ function save_client_user(PDO $pdo): void
             }
             throw $e;
         }
+        write_admin_audit($pdo, 'client_user_updated', [
+            'target_type' => 'client_user',
+            'target_id' => $id,
+            'target_label' => $username,
+            'details' => ['client_id' => $clientId, 'role' => $role, 'is_active' => $isActive],
+        ]);
         json_response(['ok' => true]);
     }
 
@@ -867,6 +1132,14 @@ function save_client_user(PDO $pdo): void
         throw $e;
     }
 
+    $newId = (int)$pdo->lastInsertId();
+    write_admin_audit($pdo, 'client_user_created', [
+        'target_type' => 'client_user',
+        'target_id' => $newId,
+        'target_label' => $username,
+        'details' => ['client_id' => $clientId, 'role' => $role, 'is_active' => $isActive],
+    ]);
+
     json_response(['ok' => true]);
 }
 
@@ -883,6 +1156,12 @@ function toggle_client_user_active(PDO $pdo): void
     $pdo->prepare('UPDATE client_users SET is_active=:is_active WHERE id=:id')->execute([
         ':is_active' => $isActive,
         ':id' => $id,
+    ]);
+
+    write_admin_audit($pdo, 'client_user_toggled', [
+        'target_type' => 'client_user',
+        'target_id' => $id,
+        'details' => ['is_active' => $isActive],
     ]);
 
     json_response(['ok' => true]);
@@ -904,6 +1183,39 @@ function reset_client_user_password(PDO $pdo): void
     $pdo->prepare('UPDATE client_users SET password_hash=:password_hash WHERE id=:id')->execute([
         ':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
         ':id' => $id,
+    ]);
+
+    write_admin_audit($pdo, 'client_user_password_reset', [
+        'target_type' => 'client_user',
+        'target_id' => $id,
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function delete_client_user(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Utilisateur invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, username, client_id FROM client_users WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_response(['ok' => false, 'error' => 'Utilisateur introuvable'], 404);
+    }
+
+    $pdo->prepare('DELETE FROM client_users WHERE id=:id')->execute([':id' => $id]);
+
+    write_admin_audit($pdo, 'client_user_deleted', [
+        'target_type' => 'client_user',
+        'target_id' => $id,
+        'target_label' => (string)($row['username'] ?? ''),
+        'details' => ['client_id' => (int)($row['client_id'] ?? 0)],
     ]);
 
     json_response(['ok' => true]);
@@ -953,6 +1265,13 @@ function save_admin_user(PDO $pdo): void
             throw $e;
         }
 
+        write_admin_audit($pdo, 'admin_user_updated', [
+            'target_type' => 'admin_user',
+            'target_id' => $id,
+            'target_label' => $username,
+            'details' => ['is_active' => $isActive],
+        ]);
+
         json_response(['ok' => true]);
     }
 
@@ -975,6 +1294,14 @@ function save_admin_user(PDO $pdo): void
         }
         throw $e;
     }
+
+    $newId = (int)$pdo->lastInsertId();
+    write_admin_audit($pdo, 'admin_user_created', [
+        'target_type' => 'admin_user',
+        'target_id' => $newId,
+        'target_label' => $username,
+        'details' => ['is_active' => $isActive],
+    ]);
 
     json_response(['ok' => true]);
 }
@@ -1010,6 +1337,12 @@ function toggle_admin_user_active(PDO $pdo): void
         ':id' => $id,
     ]);
 
+    write_admin_audit($pdo, 'admin_user_toggled', [
+        'target_type' => 'admin_user',
+        'target_id' => $id,
+        'details' => ['is_active' => $isActive],
+    ]);
+
     json_response(['ok' => true]);
 }
 
@@ -1031,6 +1364,52 @@ function reset_admin_user_password(PDO $pdo): void
     $pdo->prepare('UPDATE admin_users SET password_hash=:password_hash WHERE id=:id')->execute([
         ':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
         ':id' => $id,
+    ]);
+
+    write_admin_audit($pdo, 'admin_user_password_reset', [
+        'target_type' => 'admin_user',
+        'target_id' => $id,
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function delete_admin_user(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Admin invalide'], 422);
+    }
+
+    start_app_session();
+    $currentAdminId = isset($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : 0;
+    if ($currentAdminId > 0 && $currentAdminId === $id) {
+        json_response(['ok' => false, 'error' => 'Impossible de supprimer ton propre compte admin'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT id, username, is_active FROM admin_users WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_response(['ok' => false, 'error' => 'Admin introuvable'], 404);
+    }
+
+    $remainingStmt = $pdo->prepare('SELECT COUNT(*) FROM admin_users WHERE is_active=1 AND id<>:id');
+    $remainingStmt->execute([':id' => $id]);
+    $remaining = (int)$remainingStmt->fetchColumn();
+    $hasEnvAdmin = has_env_admin_hash();
+    if ((int)($row['is_active'] ?? 0) === 1 && $remaining <= 0 && !$hasEnvAdmin) {
+        json_response(['ok' => false, 'error' => 'Au moins un admin actif est requis'], 422);
+    }
+
+    $pdo->prepare('DELETE FROM admin_users WHERE id=:id')->execute([':id' => $id]);
+
+    write_admin_audit($pdo, 'admin_user_deleted', [
+        'target_type' => 'admin_user',
+        'target_id' => $id,
+        'target_label' => (string)($row['username'] ?? ''),
     ]);
 
     json_response(['ok' => true]);
@@ -1156,6 +1535,11 @@ function admin_send_client_user_reset_link(PDO $pdo): void
     }
 
     issue_password_reset_link($pdo, 'client', (int)$row['id'], $email, (string)$row['username']);
+    write_admin_audit($pdo, 'client_user_reset_link_sent', [
+        'target_type' => 'client_user',
+        'target_id' => (int)$row['id'],
+        'target_label' => (string)$row['username'],
+    ]);
     json_response(['ok' => true]);
 }
 
@@ -1179,6 +1563,11 @@ function admin_send_admin_user_reset_link(PDO $pdo): void
     }
 
     issue_password_reset_link($pdo, 'admin', (int)$row['id'], $email, (string)$row['username']);
+    write_admin_audit($pdo, 'admin_user_reset_link_sent', [
+        'target_type' => 'admin_user',
+        'target_id' => (int)$row['id'],
+        'target_label' => (string)$row['username'],
+    ]);
     json_response(['ok' => true]);
 }
 
@@ -2667,9 +3056,10 @@ function save_client_profile(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'Nom client requis'], 422);
     }
 
-    $stmt = $pdo->prepare('SELECT id FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, name, client_type, email, phone, website, facebook_url, instagram_url, logo_url, address, city, postal_code, country, latitude, longitude, description_short, description_long FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
     $stmt->execute([':id' => $clientId]);
-    if (!$stmt->fetch()) {
+    $existingClient = $stmt->fetch();
+    if (!$existingClient) {
         json_response(['ok' => false, 'error' => 'Client introuvable'], 404);
     }
 
@@ -2713,6 +3103,30 @@ function save_client_profile(PDO $pdo): void
         public_updated_at=NOW()
         WHERE id=:id')
         ->execute($payload);
+
+    $changedFields = [];
+    foreach ([
+        'name', 'client_type', 'email', 'phone', 'website', 'facebook_url', 'instagram_url', 'logo_url',
+        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude', 'description_short', 'description_long'
+    ] as $field) {
+        $oldValue = (string)($existingClient[$field] ?? '');
+        $newValue = (string)($payload[':' . $field] ?? '');
+        if ($oldValue !== $newValue) {
+            $changedFields[] = $field;
+        }
+    }
+
+    if ($changedFields) {
+        write_admin_audit($pdo, 'client_account_updated', [
+            'target_type' => 'action',
+            'target_id' => $clientId,
+            'target_label' => (string)($name !== '' ? $name : ('client#' . $clientId)),
+            'details' => [
+                'client_id' => $clientId,
+                'changed_fields' => $changedFields,
+            ],
+        ]);
+    }
 
     json_response(['ok' => true]);
 }
@@ -2812,12 +3226,15 @@ function save_client_supplier_profile(PDO $pdo): void
         'relationship_status' => $relationshipStatus,
     ];
 
+    $changedFields = [];
+
     foreach ($trackedFields as $field => $newValue) {
         $oldValue = $existing[$field] ?? null;
         if ((string)$oldValue === (string)$newValue) {
             continue;
         }
         write_supplier_audit($pdo, $supplierId, 'client_profile_update', $field, $oldValue, $newValue, ['client_id' => $clientId]);
+        $changedFields[] = $field;
     }
 
     // Merge this client's changes into the global supplier record, preserving
@@ -2839,6 +3256,28 @@ function save_client_supplier_profile(PDO $pdo): void
     $pdo->prepare('UPDATE suppliers SET activity_text=:activity_text WHERE id=:id')
         ->execute([':activity_text' => implode('; ', $mergedActivities), ':id' => $supplierId]);
     sync_supplier_labels($pdo, $supplierId, $mergedLabels);
+
+    if ($changedFields) {
+        $metaStmt = $pdo->prepare('SELECT c.name AS client_name, s.name AS supplier_name FROM clients c JOIN suppliers s ON s.id=:supplier_id WHERE c.id=:client_id LIMIT 1');
+        $metaStmt->execute([':client_id' => $clientId, ':supplier_id' => $supplierId]);
+        $meta = $metaStmt->fetch() ?: [];
+
+        $clientName = trim((string)($meta['client_name'] ?? ''));
+        $supplierName = trim((string)($meta['supplier_name'] ?? ''));
+        $targetLabel = trim(($clientName !== '' ? $clientName : ('client#' . $clientId)) . ' / ' . ($supplierName !== '' ? $supplierName : ('supplier#' . $supplierId)));
+
+        write_admin_audit($pdo, 'client_profile_saved', [
+            'target_type' => 'action',
+            'target_id' => $supplierId,
+            'target_label' => $targetLabel,
+            'details' => [
+                'client_id' => $clientId,
+                'supplier_id' => $supplierId,
+                'changed_fields' => $changedFields,
+                'relationship_status' => $relationshipStatus,
+            ],
+        ]);
+    }
 
     json_response(['ok' => true]);
 }
@@ -2999,6 +3438,23 @@ function save_supplier_creation_request(PDO $pdo): void
             ':notes' => trim((string)($input['notes'] ?? '')),
         ]);
 
+    $requestId = (int)$pdo->lastInsertId();
+    $clientNameStmt = $pdo->prepare('SELECT name FROM clients WHERE id=:id LIMIT 1');
+    $clientNameStmt->execute([':id' => $clientId]);
+    $clientName = (string)($clientNameStmt->fetchColumn() ?: ('client#' . $clientId));
+
+    write_admin_audit($pdo, 'supplier_creation_request_submitted', [
+        'target_type' => 'action',
+        'target_id' => $requestId,
+        'target_label' => $clientName . ' / ' . $name,
+        'details' => [
+            'request_id' => $requestId,
+            'client_id' => $clientId,
+            'requested_by_user_id' => $requestedByUserId,
+            'supplier_name' => $name,
+        ],
+    ]);
+
     json_response(['ok' => true]);
 }
 
@@ -3121,6 +3577,22 @@ function save_supplier_link_request(PDO $pdo): void
 
     $requestId = (int)$pdo->lastInsertId();
     notify_admin_new_supplier_link_request($pdo, $requestId, $supplierId, $clientId, $note);
+
+    $clientNameStmt = $pdo->prepare('SELECT name FROM clients WHERE id=:id LIMIT 1');
+    $clientNameStmt->execute([':id' => $clientId]);
+    $clientName = (string)($clientNameStmt->fetchColumn() ?: ('client#' . $clientId));
+
+    write_admin_audit($pdo, 'supplier_link_request_submitted', [
+        'target_type' => 'action',
+        'target_id' => $requestId,
+        'target_label' => $clientName . ' / ' . (string)($supplier['name'] ?? ('supplier#' . $supplierId)),
+        'details' => [
+            'request_id' => $requestId,
+            'client_id' => $clientId,
+            'supplier_id' => $supplierId,
+            'requested_by_user_id' => $requestedByUserId,
+        ],
+    ]);
 
     json_response(['ok' => true]);
 }
@@ -3482,6 +3954,25 @@ function save_supplier_change_request(PDO $pdo): void
 
     write_supplier_audit($pdo, $supplierId, 'change_request_created', $fieldName, $oldValue, $newValue, ['client_id' => $clientId]);
 
+    $metaStmt = $pdo->prepare('SELECT c.name AS client_name, s.name AS supplier_name FROM clients c JOIN suppliers s ON s.id=:supplier_id WHERE c.id=:client_id LIMIT 1');
+    $metaStmt->execute([':client_id' => $clientId, ':supplier_id' => $supplierId]);
+    $meta = $metaStmt->fetch() ?: [];
+    $clientName = trim((string)($meta['client_name'] ?? ''));
+    $supplierName = trim((string)($meta['supplier_name'] ?? ''));
+
+    write_admin_audit($pdo, 'supplier_change_request_submitted', [
+        'target_type' => 'action',
+        'target_id' => $requestId,
+        'target_label' => ($clientName !== '' ? $clientName : ('client#' . $clientId)) . ' / ' . ($supplierName !== '' ? $supplierName : ('supplier#' . $supplierId)),
+        'details' => [
+            'request_id' => $requestId,
+            'client_id' => $clientId,
+            'supplier_id' => $supplierId,
+            'field_name' => $fieldName,
+            'requested_by_user_id' => $requestedByUserId,
+        ],
+    ]);
+
     json_response(['ok' => true]);
 }
 
@@ -3732,6 +4223,22 @@ function map_data(PDO $pdo): void
         LEFT JOIN clients c ON c.id = cs.client_id
         LEFT JOIN supplier_labels sl ON sl.supplier_id = s.id
         LEFT JOIN labels l ON l.id = sl.label_id
+        WHERE (
+            NOT EXISTS (
+                SELECT 1
+                FROM client_suppliers cs0
+                WHERE cs0.supplier_id = s.id
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM client_suppliers cs1
+                LEFT JOIN client_supplier_profiles csp1
+                  ON csp1.client_id = cs1.client_id
+                 AND csp1.supplier_id = cs1.supplier_id
+                WHERE cs1.supplier_id = s.id
+                  AND COALESCE(csp1.relationship_status, 'active') <> 'inactive'
+            )
+        )
         GROUP BY s.id";
     $rows = $pdo->query($sql)->fetchAll();
 

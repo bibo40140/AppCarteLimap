@@ -4,6 +4,7 @@ let state = {
   client_users: [],
   admin_users: [],
   password_reset_audit: [],
+  audit_logs: [],
   change_requests: [],
   supplier_create_requests: [],
   supplier_link_requests: [],
@@ -394,6 +395,7 @@ function renderClientUsers() {
             <button type="button" onclick="toggleClientUserActive(${u.id}, ${Number(u.is_active) === 1 ? 0 : 1})">${Number(u.is_active) === 1 ? 'Désactiver' : 'Activer'}</button>
             <button type="button" onclick="sendClientUserResetLink(${u.id})" ${hasEmail ? '' : 'disabled title="Email utilisateur manquant"'}>${hasEmail ? 'Envoyer lien reset' : 'Email manquant'}</button>
             <button type="button" onclick="resetClientUserPassword(${u.id})">Reset mot de passe</button>
+            <button type="button" class="danger" onclick="deleteClientUser(${u.id})">Supprimer</button>
           </div>
         </td>
       </tr>
@@ -428,6 +430,7 @@ function renderAdminUsers() {
             <button type="button" onclick="toggleAdminUserActive(${u.id}, ${Number(u.is_active) === 1 ? 0 : 1})">${Number(u.is_active) === 1 ? 'Désactiver' : 'Activer'}</button>
             <button type="button" onclick="sendAdminUserResetLink(${u.id})" ${hasEmail ? '' : 'disabled title="Email admin manquant"'}>${hasEmail ? 'Envoyer lien reset' : 'Email manquant'}</button>
             <button type="button" onclick="resetAdminUserPassword(${u.id})">Reset mot de passe</button>
+            <button type="button" class="danger" onclick="deleteAdminUser(${u.id})">Supprimer</button>
           </div>
         </td>
       </tr>
@@ -435,6 +438,84 @@ function renderAdminUsers() {
   }).join('');
 
   host.innerHTML = `<table><thead><tr><th>Utilisateur admin</th><th>Email</th><th>Statut</th><th>Dernière connexion</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderAuditLogs() {
+  const host = q('auditLogsTable');
+  if (!host) return;
+
+  const rowsData = state.audit_logs || [];
+  const textFilter = String(q('auditFilterText')?.value || '').trim().toLocaleLowerCase('fr');
+  const actorTypeFilter = String(q('auditFilterActorType')?.value || '').trim();
+  const kindFilter = String(q('auditFilterKind')?.value || '').trim();
+
+  const classifyLogKind = (row) => {
+    const action = String(row.action_name || '');
+    const targetType = String(row.target_type || '');
+    if (action.startsWith('auth_')) return 'auth';
+    if (targetType === 'visit' || action.startsWith('ui_visit')) return 'visit';
+    return 'action';
+  };
+
+  const filtered = rowsData.filter((row) => {
+    if (actorTypeFilter && String(row.actor_type || '') !== actorTypeFilter) {
+      return false;
+    }
+
+    const kind = classifyLogKind(row);
+    if (kindFilter && kind !== kindFilter) {
+      return false;
+    }
+
+    if (textFilter) {
+      const haystack = [
+        row.created_at,
+        row.actor_type,
+        row.actor_name,
+        row.action_name,
+        kind,
+        row.target_type,
+        row.target_label,
+        row.ip_address,
+        row.user_agent,
+      ].map((value) => String(value || '').toLocaleLowerCase('fr')).join(' ');
+      if (!haystack.includes(textFilter)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const summary = q('auditSummary');
+  if (summary) {
+    summary.textContent = `${filtered.length} trace(s) affichée(s) / ${rowsData.length}`;
+  }
+
+  if (!filtered.length) {
+    host.innerHTML = '<div class="muted">Aucune trace pour ce filtre.</div>';
+    return;
+  }
+
+  const rows = filtered.map((r) => {
+    const details = r.details_json ? escapeHtml(String(r.details_json)) : '—';
+    const kind = classifyLogKind(r);
+    return `
+      <tr>
+        <td>${escapeHtml(String(r.created_at || ''))}</td>
+        <td>${escapeHtml(String(kind || ''))}</td>
+        <td>${escapeHtml(String(r.actor_type || ''))}</td>
+        <td>${escapeHtml(String(r.actor_name || ''))}</td>
+        <td>${escapeHtml(String(r.action_name || ''))}</td>
+        <td>${escapeHtml(String(r.target_type || ''))}</td>
+        <td>${escapeHtml(String(r.target_label || (r.target_id ?? '')))}</td>
+        <td>${details}</td>
+        <td>${escapeHtml(String(r.ip_address || ''))}</td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Date</th><th>Nature</th><th>Type acteur</th><th>Acteur</th><th>Action</th><th>Type cible</th><th>Cible</th><th>Détails</th><th>IP</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderResetAudit() {
@@ -858,6 +939,7 @@ function renderAll() {
   renderClientUsers();
   renderAdminUsers();
   renderResetAudit();
+  renderAuditLogs();
   hydrateSelects();
   renderVisualSettings();
   renderChangeRequests();
@@ -885,6 +967,13 @@ function bindTabs() {
       const tab = btn.getAttribute('data-tab');
       btns.forEach(b => b.classList.toggle('active', b === btn));
       panels.forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+      api('audit/ui-event', 'POST', {
+        event_name: 'ui_visit_tab',
+        event_type: 'visit',
+        app: 'admin',
+        page: 'admin',
+        tab: String(tab || ''),
+      }).catch(() => {});
     });
   });
 }
@@ -2199,6 +2288,7 @@ async function loadBootstrap() {
   state.client_users = data.client_users || [];
   state.admin_users = data.admin_users || [];
   state.password_reset_audit = data.password_reset_audit || [];
+  state.audit_logs = data.audit_logs || [];
   state.activities = data.activities || [];
   state.labels = data.labels || [];
   state.supplier_types = data.supplier_types || [];
@@ -2320,6 +2410,27 @@ window.resetClientUserPassword = async function resetClientUserPassword(id) {
   }
 };
 
+window.deleteClientUser = async function deleteClientUser(id) {
+  const u = state.client_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  if (!window.confirm(`Supprimer définitivement l'utilisateur client "${u.username}" ?`)) return;
+
+  q('clientUserMsg').textContent = '';
+  try {
+    await api('admin/client-user/delete', 'POST', { id });
+    q('clientUserMsg').textContent = 'Utilisateur client supprimé';
+    if (Number(q('clientUserId').value) === Number(id)) {
+      q('formClientUser').reset();
+      q('clientUserId').value = '';
+      q('clientUserRole').value = 'client_manager';
+      q('clientUserIsActive').checked = true;
+    }
+    await loadBootstrap();
+  } catch (e) {
+    q('clientUserMsg').textContent = e.message;
+  }
+};
+
 window.sendClientUserResetLink = async function sendClientUserResetLink(id) {
   const u = state.client_users.find(x => Number(x.id) === Number(id));
   if (!u) return;
@@ -2376,6 +2487,26 @@ window.resetAdminUserPassword = async function resetAdminUserPassword(id) {
   try {
     await api('admin/admin-user/reset-password', 'POST', { id, new_password: newPassword });
     q('adminUserMsg').textContent = 'Mot de passe admin réinitialisé';
+  } catch (e) {
+    q('adminUserMsg').textContent = e.message;
+  }
+};
+
+window.deleteAdminUser = async function deleteAdminUser(id) {
+  const u = state.admin_users.find(x => Number(x.id) === Number(id));
+  if (!u) return;
+  if (!window.confirm(`Supprimer définitivement l'admin "${u.username}" ?`)) return;
+
+  q('adminUserMsg').textContent = '';
+  try {
+    await api('admin/admin-user/delete', 'POST', { id });
+    q('adminUserMsg').textContent = 'Utilisateur admin supprimé';
+    if (Number(q('adminUserId').value) === Number(id)) {
+      q('formAdminUser').reset();
+      q('adminUserId').value = '';
+      q('adminUserIsActive').checked = true;
+    }
+    await loadBootstrap();
   } catch (e) {
     q('adminUserMsg').textContent = e.message;
   }
@@ -3295,6 +3426,28 @@ function bindEvents() {
 
   q('btnExportRequestsCsv').addEventListener('click', () => {
     downloadRequestsCsv();
+  });
+
+  q('btnReloadAuditLogs').addEventListener('click', async () => {
+    q('auditMsg').textContent = '';
+    try {
+      await loadBootstrap();
+      q('auditMsg').textContent = 'Traces rafraîchies';
+    } catch (e) {
+      q('auditMsg').textContent = e.message;
+    }
+  });
+
+  q('auditFilterText').addEventListener('input', () => {
+    renderAuditLogs();
+  });
+
+  q('auditFilterActorType').addEventListener('change', () => {
+    renderAuditLogs();
+  });
+
+  q('auditFilterKind').addEventListener('change', () => {
+    renderAuditLogs();
   });
 }
 

@@ -306,6 +306,24 @@ CREATE TABLE IF NOT EXISTS supplier_audit_log (
   CONSTRAINT fk_supplier_audit_log_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  actor_type VARCHAR(30) NOT NULL,
+  actor_id INT NULL,
+  actor_name VARCHAR(190) NULL,
+  action_name VARCHAR(80) NOT NULL,
+  target_type VARCHAR(40) NULL,
+  target_id INT NULL,
+  target_label VARCHAR(255) NULL,
+  details_json JSON NULL,
+  ip_address VARCHAR(64) NULL,
+  user_agent VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_admin_audit_created_at (created_at),
+  INDEX idx_admin_audit_actor (actor_type, actor_id),
+  INDEX idx_admin_audit_action (action_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO settings (setting_key, setting_value)
 VALUES
   ('org_name', 'Carte Fournisseurs'),

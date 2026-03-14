@@ -21,6 +21,30 @@ const mapState = {
 
 const q = (id) => document.getElementById(id);
 
+let lastUiTrackAt = 0;
+
+function trackUiEvent(eventName, payload = {}) {
+  if (!state.me || (!state.me.is_client_user && !state.me.is_admin)) {
+    return;
+  }
+
+  // Avoid flooding when the same tab is re-rendered quickly.
+  const now = Date.now();
+  if (now - lastUiTrackAt < 350) {
+    return;
+  }
+  lastUiTrackAt = now;
+
+  api('audit/ui-event', 'POST', {
+    event_name: eventName,
+    event_type: payload.event_type || 'visit',
+    app: payload.app || 'client',
+    page: payload.page || 'client',
+    tab: payload.tab || '',
+    meta: payload.meta || {},
+  }).catch(() => {});
+}
+
 async function api(action, method = 'GET', body = null, query = {}) {
   const params = new URLSearchParams({ action, ...query });
   const opts = { method, credentials: 'include', headers: {} };
@@ -83,6 +107,13 @@ function setClientTab(tabName) {
       mapState.map?.invalidateSize();
     }, 0);
   }
+
+  trackUiEvent('ui_visit_tab', {
+    event_type: 'visit',
+    app: 'client',
+    page: 'client',
+    tab: tabName,
+  });
 }
 
 function bindClientTabs() {
@@ -589,11 +620,12 @@ function renderSupplierList() {
     .map((s) => {
       const isActive = Number(state.selectedSupplierId) === Number(s.id);
       const rel = safe(s.relationship_status) || 'active';
+      const relLabel = relationshipStatusLabel(rel);
       const city = safe(s.city) || '-';
       return [
         '<div class="list-item ' + (isActive ? 'active' : '') + '" data-id="' + Number(s.id) + '">',
         '<div class="list-main">' + (safe(s.name) || '(sans nom)') + '</div>',
-        '<div class="list-sub">' + city + ' - statut: ' + rel + '</div>',
+        '<div class="list-sub">' + city + ' - statut: ' + relLabel + '</div>',
         '</div>',
       ].join('');
     })
@@ -602,6 +634,17 @@ function renderSupplierList() {
   host.querySelectorAll('.list-item[data-id]').forEach((el) => {
     el.addEventListener('click', () => {
       state.selectedSupplierId = Number(el.getAttribute('data-id'));
+      const supplier = state.suppliers.find((row) => Number(row.id) === Number(state.selectedSupplierId));
+      trackUiEvent('ui_view_supplier', {
+        event_type: 'visit',
+        app: 'client',
+        page: 'client',
+        tab: 'my-suppliers',
+        meta: {
+          supplier_id: Number(state.selectedSupplierId),
+          supplier_name: safe(supplier?.name),
+        },
+      });
       renderSupplierList();
       renderEditor();
     });
@@ -665,6 +708,14 @@ function statusLabel(status) {
   if (status === 'approved') return 'Approuvée';
   if (status === 'rejected') return 'Refusée';
   return 'En attente';
+}
+
+function relationshipStatusLabel(status) {
+  if (status === 'active') return 'Actif';
+  if (status === 'prospect') return 'Prospect';
+  if (status === 'inactive') return 'Inactif';
+  if (status === 'blocked') return 'Bloqué';
+  return safe(status) || 'Actif';
 }
 
 function renderChangeRequestsForSelectedSupplier() {
@@ -780,6 +831,15 @@ async function onSearchSupplierLinkCandidates() {
     query.q = qText;
     const res = await api('client/supplier-link-search', 'GET', null, query);
     state.supplierLinkSearchResults = Array.isArray(res.suppliers) ? res.suppliers : [];
+    trackUiEvent('ui_search_supplier_link_candidates', {
+      event_type: 'action',
+      app: 'client',
+      page: 'client',
+      tab: 'new-supplier',
+      meta: {
+        result_count: state.supplierLinkSearchResults.length,
+      },
+    });
     renderSupplierLinkSearchResults();
     showMsg('linkSupplierMsg', `${state.supplierLinkSearchResults.length} resultat(s)`);
   } catch (e) {
@@ -873,6 +933,11 @@ async function onResetPassword() {
 }
 
 async function onLogout() {
+  trackUiEvent('ui_logout_click', {
+    event_type: 'action',
+    app: 'client',
+    page: 'client',
+  });
   await api('auth/logout', 'POST');
   state.me = null;
   state.client = null;
