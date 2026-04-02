@@ -1,11 +1,13 @@
 param(
-  [string]$ProjectRoot = "D:\Perso\Limap\AppCarteLimap"
+  [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$DbName = 'appcarte',
+  [string]$MySqlPath = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $xlsx = Join-Path $ProjectRoot 'CarteFournisseur.xlsx'
-$mysql = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
+$mysql = $MySqlPath
 $tmp = Join-Path $ProjectRoot '_tmp_import_clients'
 
 if (!(Test-Path $xlsx)) { throw "Excel file not found: $xlsx" }
@@ -48,7 +50,7 @@ function Invoke-MySqlFile([string]$mysqlExe, [string]$sqlFilePath) {
   if (!(Test-Path $sqlFilePath)) {
     throw "SQL file not found: $sqlFilePath"
   }
-  $cmd = '"' + $mysqlExe + '" --default-character-set=utf8mb4 -uroot appcarte < "' + $sqlFilePath + '"'
+  $cmd = '"' + $mysqlExe + '" --default-character-set=utf8mb4 -uroot ' + $DbName + ' < "' + $sqlFilePath + '"'
   cmd /c $cmd | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "MySQL execution failed for file: $sqlFilePath"
@@ -188,7 +190,7 @@ for ($i = 1; $i -lt $clientRows.Count; $i++) {
 if ($clients.Count -eq 0) { throw 'No client rows extracted from Excel.' }
 
 $sql = New-Object System.Collections.Generic.List[string]
-$sql.Add('USE appcarte;')
+$sql.Add("USE $DbName;")
 
 foreach ($c in $clients) {
   $n = Escape-Sql $c.name
@@ -216,7 +218,7 @@ $seedPath = Join-Path $tmp 'import_clients.sql'
 Set-Content -Path $seedPath -Value ($sql -join "`r`n") -Encoding UTF8
 Invoke-MySqlFile -mysqlExe $mysql -sqlFilePath $seedPath
 
-& $mysql --default-character-set=utf8mb4 -uroot -e "USE appcarte; SELECT COUNT(*) AS clients_count FROM clients; SELECT id, name, logo_url FROM clients ORDER BY name LIMIT 10;"
+& $mysql --default-character-set=utf8mb4 -uroot -e "USE $DbName; SELECT COUNT(*) AS clients_count FROM clients; SELECT id, name, logo_url FROM clients ORDER BY name LIMIT 10;"
 
 Remove-Item $tmp -Recurse -Force
 Write-Output ("Clients import complete: $($clients.Count) rows")

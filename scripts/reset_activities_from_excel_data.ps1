@@ -1,11 +1,13 @@
 param(
-  [string]$ProjectRoot = "D:\Perso\Limap\AppCarteLimap"
+  [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$DbName = 'appcarte',
+  [string]$MySqlPath = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $xlsx = Join-Path $ProjectRoot 'CarteFournisseur.xlsx'
-$mysql = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
+$mysql = $MySqlPath
 $tmp = Join-Path $ProjectRoot '_tmp_reset_activities'
 
 if (!(Test-Path $xlsx)) { throw "Excel file not found: $xlsx" }
@@ -138,7 +140,7 @@ if ($activities.Count -eq 0) {
 }
 
 $sql = New-Object System.Collections.Generic.List[string]
-$sql.Add('USE appcarte;')
+$sql.Add("USE $DbName;")
 $sql.Add('SET FOREIGN_KEY_CHECKS=0;')
 $sql.Add('DELETE FROM supplier_activities;')
 $sql.Add('TRUNCATE TABLE activities;')
@@ -156,7 +158,7 @@ $sql.Add("SELECT id, family, name, icon_url FROM activities ORDER BY id;")
 $sqlPath = Join-Path $tmp 'reset_activities.sql'
 Set-Content -Path $sqlPath -Value ($sql -join "`r`n") -Encoding UTF8
 
-$cmd = '"' + $mysql + '" --default-character-set=utf8mb4 -uroot < "' + $sqlPath + '"'
+$cmd = '"' + $mysql + '" --default-character-set=utf8mb4 -uroot ' + $DbName + ' < "' + $sqlPath + '"'
 cmd /c $cmd
 if ($LASTEXITCODE -ne 0) {
   throw 'MySQL execution failed for reset activities.'

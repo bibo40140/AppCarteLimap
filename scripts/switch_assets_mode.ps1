@@ -1,10 +1,12 @@
 param(
   [ValidateSet('local','prod')]
-  [string]$Mode = 'local'
+  [string]$Mode = 'local',
+  [string]$DbName = 'appcarte',
+  [string]$MySqlPath = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
 )
 
 $ErrorActionPreference = 'Stop'
-$mysql = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
+$mysql = $MySqlPath
 
 if (!(Test-Path $mysql)) {
   throw "mysql.exe not found: $mysql"
@@ -12,7 +14,7 @@ if (!(Test-Path $mysql)) {
 
 if ($Mode -eq 'local') {
   $sql = @"
-USE appcarte;
+USE $DbName;
 UPDATE clients SET logo_url=REPLACE(logo_url,'/Carte/assets/','/assets/') WHERE logo_url LIKE '/Carte/assets/%';
 UPDATE activities SET icon_url=REPLACE(icon_url,'/Carte/assets/','/assets/') WHERE icon_url LIKE '/Carte/assets/%';
 UPDATE suppliers SET logo_url=REPLACE(logo_url,'/Carte/assets/','/assets/') WHERE logo_url LIKE '/Carte/assets/%';
@@ -26,7 +28,7 @@ UNION ALL SELECT 'activities_carte_assets', COUNT(*) FROM activities WHERE icon_
 "@
 } else {
   $sql = @"
-USE appcarte;
+USE $DbName;
 UPDATE clients SET logo_url=REPLACE(logo_url,'/assets/','/Carte/assets/') WHERE logo_url LIKE '/assets/%';
 UPDATE activities SET icon_url=REPLACE(icon_url,'/assets/','/Carte/assets/') WHERE icon_url LIKE '/assets/%';
 UPDATE suppliers SET logo_url=REPLACE(logo_url,'/assets/','/Carte/assets/') WHERE logo_url LIKE '/assets/%';

@@ -167,3 +167,30 @@ Identifiants admin:
 
 - utilisateur via `MAP_ADMIN_USER`
 - mot de passe via hash `MAP_ADMIN_PASS_HASH`
+
+## Dupliquer pour plusieurs sites
+
+Le script `scripts/clone_project.ps1` permet de cloner ce projet vers d'autres dossiers avec des valeurs par defaut adaptees:
+
+- nom de base (`DbName`) dans les scripts PowerShell,
+- `MAP_DB_NAME` par defaut dans `api/config.php`,
+- `session_name` admin,
+- nom d'expediteur des notifications.
+
+Exemple (creer `AppCarteCoopaz` et `AppCarteInterkoop` a cote du dossier courant):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File '.\scripts\clone_project.ps1'
+```
+
+Puis, dans chaque clone:
+
+1. Copier le fichier Excel dans le dossier racine sous le nom `CarteFournisseur.xlsx`.
+2. Creer/importer le schema MySQL pour la base du clone (`database/schema.sql`).
+3. Lancer le seed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File '.\scripts\seed_from_excel.ps1'
+```
+
+Le seed met a jour categories/activites/labels et les donnees fournisseurs/clients selon l'Excel du clone.

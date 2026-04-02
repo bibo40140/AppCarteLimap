@@ -1,5 +1,7 @@
 param(
-  [string]$ProjectRoot = "D:\Perso\Limap\AppCarteLimap",
+  [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$DbName = 'appcarte',
+  [string]$MySqlPath = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe',
   [int]$Rows = 0,
   [switch]$ResetData = $true
 )
@@ -7,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $xlsx = Join-Path $ProjectRoot 'CarteFournisseur.xlsx'
-$mysql = 'C:\wamp64\bin\mysql\mysql8.2.0\bin\mysql.exe'
+$mysql = $MySqlPath
 $tmp = Join-Path $ProjectRoot '_tmp_seed_excel'
 
 if (!(Test-Path $xlsx)) { throw "Excel file not found: $xlsx" }
@@ -67,7 +69,7 @@ function Invoke-MySqlFile([string]$mysqlExe, [string]$sqlFilePath) {
   if (!(Test-Path $sqlFilePath)) {
     throw "SQL file not found: $sqlFilePath"
   }
-  $cmd = '"' + $mysqlExe + '" --default-character-set=utf8mb4 -uroot appcarte < "' + $sqlFilePath + '"'
+  $cmd = '"' + $mysqlExe + '" --default-character-set=utf8mb4 -uroot ' + $DbName + ' < "' + $sqlFilePath + '"'
   cmd /c $cmd | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "MySQL execution failed for file: $sqlFilePath"
@@ -283,8 +285,8 @@ for ($i = 1; $i -lt $supplierRows.Count; $i++) {
 if ($suppliers.Count -eq 0) { throw 'No supplier rows extracted from Excel.' }
 
 if ($ResetData) {
-  $cleanupSql = @'
-USE appcarte;
+  $cleanupSql = @"
+USE $DbName;
 DELETE FROM supplier_labels;
 DELETE FROM supplier_activities;
 DELETE FROM client_suppliers;
@@ -292,14 +294,14 @@ DELETE FROM suppliers;
 DELETE FROM activities;
 DELETE FROM labels;
 DELETE FROM clients;
-'@
+"@
   $cleanupPath = Join-Path $tmp 'cleanup.sql'
   Set-Content -Path $cleanupPath -Value $cleanupSql -Encoding UTF8
   Invoke-MySqlFile -mysqlExe $mysql -sqlFilePath $cleanupPath
 }
 
 $sql = New-Object System.Collections.Generic.List[string]
-$sql.Add('USE appcarte;')
+$sql.Add("USE $DbName;")
 
 foreach ($c in $clientMap.Values) {
   $n = Escape-Sql $c.name
@@ -381,7 +383,7 @@ $seedPath = Join-Path $tmp 'seed.sql'
 Set-Content -Path $seedPath -Value ($sql -join "`r`n") -Encoding UTF8
 Invoke-MySqlFile -mysqlExe $mysql -sqlFilePath $seedPath
 
-& $mysql --default-character-set=utf8mb4 -uroot -e "USE appcarte; SELECT 'clients' t, COUNT(*) c FROM clients UNION ALL SELECT 'suppliers', COUNT(*) FROM suppliers UNION ALL SELECT 'activities', COUNT(*) FROM activities UNION ALL SELECT 'labels', COUNT(*) FROM labels;"
+& $mysql --default-character-set=utf8mb4 -uroot -e "USE $DbName; SELECT 'clients' t, COUNT(*) c FROM clients UNION ALL SELECT 'suppliers', COUNT(*) FROM suppliers UNION ALL SELECT 'activities', COUNT(*) FROM activities UNION ALL SELECT 'labels', COUNT(*) FROM labels;"
 
 Remove-Item $tmp -Recurse -Force
 Write-Output ("Seed complete: $($suppliers.Count) suppliers, $($clientMap.Count) clients")

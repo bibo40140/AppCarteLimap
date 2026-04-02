@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Espace Client - Variante claire</title>
+  <link rel="stylesheet" href="styles-clarified.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+  <main class="page alt-page">
+    <section id="loginView" class="card auth-card hero-card">
+      <div class="hero-kicker">Portail client</div>
+      <h1>Espace relation fournisseurs</h1>
+      <p class="muted">Connectez-vous pour suivre vos fournisseurs, mettre à jour votre relation client et proposer des corrections sur la fiche globale.</p>
+      <label>
+        Utilisateur
+        <input id="loginUser" autocomplete="username" />
+      </label>
+      <label>
+        Mot de passe
+        <input id="loginPass" type="password" autocomplete="current-password" />
+      </label>
+      <div class="row">
+        <button id="btnLogin" class="primary" type="button">Se connecter</button>
+        <span id="loginMsg" class="msg"></span>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnShowForgot" type="button">Mot de passe oublié ?</button>
+      </div>
+
+      <div id="forgotView" class="hidden" style="margin-top:12px;">
+        <label>
+          Votre email utilisateur
+          <input id="forgotEmail" type="email" placeholder="utilisateur@domaine.fr" />
+        </label>
+        <div class="row">
+          <button id="btnForgotSubmit" type="button">Envoyer le lien</button>
+          <span id="forgotMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div id="resetView" class="hidden" style="margin-top:12px;">
+        <label>
+          Nouveau mot de passe
+          <input id="resetPassword" type="password" autocomplete="new-password" />
+        </label>
+        <label>
+          Confirmer le mot de passe
+          <input id="resetPasswordConfirm" type="password" autocomplete="new-password" />
+        </label>
+        <div class="row">
+          <button id="btnResetSubmit" type="button">Définir le mot de passe</button>
+          <span id="resetMsg" class="msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="appView" class="hidden">
+      <header class="card topbar topbar-alt">
+        <div class="topbar-main">
+          <div id="clientHeaderLogo" class="client-header-logo muted">Logo</div>
+          <div>
+            <div class="hero-kicker">Tableau de bord client</div>
+            <h2 id="clientTitle"><span id="clientTitleText">Mon espace</span> <span id="pendingBadge" class="pending-badge hidden"></span></h2>
+            <p id="clientMeta" class="muted"></p>
+          </div>
+        </div>
+        <div class="row">
+          <span id="helloUser" class="muted"></span>
+          <button id="btnLogout" type="button">Se déconnecter</button>
+        </div>
+      </header>
+
+      <section class="card nav-card" style="margin-bottom:14px;">
+        <div class="tabs tabs-alt" id="clientTabs">
+          <button class="tab-btn active" data-tab="my-data" type="button">Ma fiche client</button>
+          <button class="tab-btn" data-tab="my-suppliers" type="button">Mes fournisseurs</button>
+          <button class="tab-btn" data-tab="new-supplier" type="button">Créer ou rattacher</button>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel active" id="panel-my-data" style="margin-bottom:14px;">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Zone 1</div>
+            <h3>Ma fiche client</h3>
+          </div>
+          <p class="muted section-head-copy">Ces informations concernent votre structure et peuvent être utilisées dans les exports.</p>
+        </div>
+        <form id="clientInfoForm" class="grid-2" onsubmit="return false;">
+          <label>Nom client
+            <input id="clientInfoName" />
+          </label>
+          <label>Type
+            <input id="clientInfoType" placeholder="AMAP / Épicerie" />
+          </label>
+          <label>Email
+            <input id="clientInfoEmail" />
+          </label>
+          <label>Téléphone
+            <input id="clientInfoPhone" />
+          </label>
+          <label>Site web
+            <input id="clientInfoWebsite" />
+          </label>
+          <label>Facebook
+            <input id="clientInfoFacebook" placeholder="https://facebook.com/..." />
+          </label>
+          <label>Instagram
+            <input id="clientInfoInstagram" placeholder="https://instagram.com/..." />
+          </label>
+          <label>Charger un logo (image)
+            <input id="clientInfoLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+            <input id="clientInfoLogoPath" readonly placeholder="Aucun fichier sélectionné" />
+          </label>
+          <label>Adresse
+            <input id="clientInfoAddress" />
+          </label>
+          <label>Ville
+            <input id="clientInfoCity" />
+          </label>
+          <label>Code postal
+            <input id="clientInfoPostal" />
+          </label>
+          <label>Pays
+            <input id="clientInfoCountry" value="France" />
+          </label>
+          <label>Latitude
+            <input id="clientInfoLat" />
+          </label>
+          <label>Longitude
+            <input id="clientInfoLng" />
+          </label>
+          <label>Texte court
+            <textarea id="clientInfoDescriptionShort" rows="3" placeholder="Résumé pour le site"></textarea>
+          </label>
+          <label>Texte long
+            <div class="editor-toolbar" id="clientInfoLongEditorToolbar">
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H2">Titre</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H3">Sous-titre</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="P">Texte</button>
+              <button type="button" data-editor-cmd="bold">Gras</button>
+              <button type="button" data-editor-cmd="insertUnorderedList">Liste</button>
+            </div>
+            <div id="clientInfoDescriptionLongEditor" class="rich-editor" contenteditable="true"></div>
+            <textarea id="clientInfoDescriptionLong" rows="5" class="hidden" placeholder="Présentation détaillée pour le site"></textarea>
+          </label>
+        </form>
+        <div id="clientInfoMap" class="client-map" style="margin-top:8px;"></div>
+        <div class="row row-actions">
+          <button id="btnClientGeocode" type="button">Géocoder l'adresse</button>
+          <button id="btnSaveClientInfo" class="primary" type="button">Mettre à jour ma fiche client</button>
+          <span id="clientInfoMsg" class="msg"></span>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel" id="panel-new-supplier" style="margin-bottom:14px;">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Zone 3</div>
+            <h3>Créer ou rattacher un fournisseur</h3>
+          </div>
+          <p class="muted section-head-copy">Deux chemins distincts: créer une nouvelle fiche ou demander le rattachement à une fiche existante.</p>
+        </div>
+
+        <div class="request-split">
+          <section class="request-card request-card-create">
+            <div class="request-badge">Créer une nouvelle fiche</div>
+            <p class="muted">À utiliser seulement si le fournisseur n'existe pas encore dans la base commune.</p>
+            <form id="supplierCreateRequestForm" class="grid-2" onsubmit="return false;">
+              <label>Nom fournisseur
+                <input id="newSupplierName" required />
+              </label>
+              <label>Type
+                <select id="newSupplierType"></select>
+              </label>
+              <label>Activités
+                <div class="multi-picker">
+                  <div id="newSupplierActivitiesChips" class="multi-chip-list"></div>
+                  <select id="newSupplierActivities" data-chip-target="newSupplierActivitiesChips"></select>
+                </div>
+              </label>
+              <label>Labels
+                <div class="multi-picker">
+                  <div id="newSupplierLabelsChips" class="multi-chip-list"></div>
+                  <select id="newSupplierLabels" data-chip-target="newSupplierLabelsChips"></select>
+                </div>
+              </label>
+              <label>Adresse
+                <input id="newSupplierAddress" />
+              </label>
+              <label>Ville
+                <input id="newSupplierCity" />
+              </label>
+              <label>Code postal
+                <input id="newSupplierPostal" />
+              </label>
+              <label>Pays
+                <input id="newSupplierCountry" value="France" />
+              </label>
+              <label>Téléphone
+                <input id="newSupplierPhone" />
+              </label>
+              <label>Email
+                <input id="newSupplierEmail" />
+              </label>
+              <label>Site web
+                <input id="newSupplierWebsite" />
+              </label>
+              <label>Notes
+                <textarea id="newSupplierNotes" rows="3" placeholder="Infos utiles pour l'admin"></textarea>
+              </label>
+            </form>
+            <div class="row row-actions">
+              <button id="btnCreateSupplierRequest" type="button">Soumettre une demande de création</button>
+              <span id="supplierCreateMsg" class="msg"></span>
+            </div>
+            <div class="history-box">
+              <h4>Historique des demandes de création</h4>
+              <div id="supplierCreateRequestsList" class="list"></div>
+            </div>
+          </section>
+
+          <section class="request-card request-card-link">
+            <div class="request-badge">Rattacher une fiche existante</div>
+            <p class="muted">À utiliser si le fournisseur existe déjà dans la base globale afin d'éviter les doublons.</p>
+            <div class="grid-2">
+              <label>Rechercher un fournisseur global
+                <input id="linkSupplierSearch" placeholder="Nom, ville, code postal..." />
+              </label>
+              <label>Note (optionnelle)
+                <input id="linkSupplierNote" placeholder="Précision pour l'admin" />
+              </label>
+            </div>
+            <div class="row row-actions" style="margin-top:8px;">
+              <button id="btnSearchLinkSupplier" type="button">Rechercher</button>
+              <span id="linkSupplierMsg" class="msg"></span>
+            </div>
+            <div id="linkSupplierSearchResults" class="list" style="margin-top:8px;"></div>
+
+            <div class="history-box">
+              <h4>Historique des demandes de rattachement</h4>
+              <div id="supplierLinkRequestsList" class="list"></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div class="layout layout-clarified client-tab-panel" id="panel-my-suppliers">
+        <aside class="card panel list-panel supplier-rail">
+          <div class="row" style="justify-content:space-between;">
+            <div>
+              <div class="section-kicker">Zone 2A</div>
+              <h3 style="margin:0;">Fournisseurs liés</h3>
+            </div>
+            <button id="btnGoNewSupplier" type="button">+ Nouveau</button>
+          </div>
+          <p class="muted rail-hint">Choisissez un fournisseur pour consulter la fiche commune, gérer votre relation et éventuellement proposer une correction globale.</p>
+          <input id="searchSupplier" placeholder="Rechercher un fournisseur..." />
+          <div id="suppliersList" class="list"></div>
+        </aside>
+
+        <section class="editor-stack">
+          <section class="card panel intro-panel">
+            <div class="intro-grid">
+              <div class="intro-box intro-box-global">
+                <div class="intro-tag">Lecture seule</div>
+                <strong>Fiche globale partagée</strong>
+                <p>Visible par tous les clients liés. Cette zone sert uniquement à consulter les données communes du fournisseur.</p>
+              </div>
+              <div class="intro-box intro-box-client">
+                <div class="intro-tag">Vous pouvez modifier</div>
+                <strong>Votre relation client</strong>
+                <p>Statut, notes, activités et labels propres à votre structure. Ces changements n'affectent pas directement la fiche globale.</p>
+              </div>
+              <div class="intro-box intro-box-request">
+                <div class="intro-tag">Validation admin</div>
+                <strong>Demande de correction globale</strong>
+                <p>Utilisez cette zone seulement si la fiche partagée doit être corrigée pour tout le monde.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="card panel supplier-focus-panel">
+            <div class="section-head supplier-focus-head">
+              <div>
+                <div class="section-kicker">Zone 2B</div>
+                <h3 id="editorTitle">Profil client fournisseur</h3>
+              </div>
+              <p id="editorHint" class="muted">Sélectionnez un fournisseur à gauche.</p>
+            </div>
+
+            <div class="editor-dual-zone">
+              <article class="editor-zone editor-zone-global">
+                <div class="zone-head">
+                  <div>
+                    <div class="zone-kicker">Bloc A</div>
+                    <h4>Fiche globale partagée</h4>
+                  </div>
+                  <span class="zone-pill zone-pill-readonly">Consultation uniquement</span>
+                </div>
+                <p class="muted zone-copy">Ces informations sont communes à tous les clients liés à ce fournisseur.</p>
+                <div id="supplierGlobal" class="global-box hidden"></div>
+              </article>
+
+              <article class="editor-zone editor-zone-client">
+                <div class="zone-head">
+                  <div>
+                    <div class="zone-kicker">Bloc B</div>
+                    <h4>Votre relation client</h4>
+                  </div>
+                  <span class="zone-pill zone-pill-edit">Modifiable</span>
+                </div>
+                <p class="muted zone-copy">Cette zone concerne uniquement votre structure: elle ne modifie pas directement la fiche globale.</p>
+
+                <form id="profileForm" class="hidden zone-form" onsubmit="return false;">
+                  <input type="hidden" id="profileSupplierId" />
+                  <label>
+                    Activités
+                    <div class="multi-picker">
+                      <div id="profileActivityChips" class="multi-chip-list"></div>
+                      <select id="profileActivitySelect" data-chip-target="profileActivityChips"></select>
+                    </div>
+                  </label>
+                  <label>
+                    Labels
+                    <div class="multi-picker">
+                      <div id="profileLabelsChips" class="multi-chip-list"></div>
+                      <select id="profileLabelsSelect" data-chip-target="profileLabelsChips"></select>
+                    </div>
+                  </label>
+                  <label>
+                    Statut de la relation
+                    <select id="profileRelationshipStatus">
+                      <option value="active">Actif</option>
+                      <option value="prospect">Prospect</option>
+                      <option value="inactive">Inactif</option>
+                      <option value="blocked">Bloqué</option>
+                    </select>
+                  </label>
+                  <label>
+                    Notes client
+                    <textarea id="profileNotes" rows="5" placeholder="Notes internes client"></textarea>
+                  </label>
+                  <div class="row row-actions">
+                    <button id="btnSaveProfile" class="primary" type="button">Enregistrer mon espace client</button>
+                    <span id="profileMsg" class="msg"></span>
+                  </div>
+                </form>
+              </article>
+            </div>
+
+            <section id="changeRequestSection" class="hidden change-request-shell">
+              <div class="zone-head">
+                <div>
+                  <div class="zone-kicker">Bloc C</div>
+                  <h4>Demander une modification de la fiche globale</h4>
+                </div>
+                <span class="zone-pill zone-pill-admin">Validation admin requise</span>
+              </div>
+              <p class="muted zone-copy">Utilisez cette zone uniquement si la fiche partagée est incorrecte pour tous les clients. Votre demande sera validée ou refusée par un administrateur.</p>
+              <form id="changeRequestForm" class="change-request-form" onsubmit="return false;">
+                <label>
+                  Champ à modifier
+                  <select id="changeRequestField">
+                    <option value="name">Nom</option>
+                    <option value="address">Adresse</option>
+                    <option value="city">Ville</option>
+                    <option value="postal_code">Code postal</option>
+                    <option value="country">Pays</option>
+                    <option value="phone">Téléphone</option>
+                    <option value="email">Email</option>
+                    <option value="website">Site web</option>
+                    <option value="facebook_url">Facebook</option>
+                    <option value="instagram_url">Instagram</option>
+                    <option value="linkedin_url">LinkedIn</option>
+                    <option value="logo_url">Logo (URL)</option>
+                    <option value="photo_cover_url">Image de couverture (URL)</option>
+                    <option value="slug">Slug public</option>
+                    <option value="description_short">Description courte</option>
+                    <option value="description_long">Description longue</option>
+                    <option value="supplier_type">Type fournisseur</option>
+                    <option value="activity_text">Activités globales</option>
+                    <option value="labels">Labels globaux</option>
+                  </select>
+                </label>
+                <label>
+                  Nouvelle valeur proposée
+                  <textarea id="changeRequestNewValue" rows="3" placeholder="Saisir la valeur proposée"></textarea>
+                  <select id="changeRequestSupplierType" class="hidden"></select>
+                  <div class="multi-picker hidden" id="changeRequestActivitiesWrap">
+                    <div id="changeRequestActivitiesChips" class="multi-chip-list"></div>
+                    <select id="changeRequestActivities" data-chip-target="changeRequestActivitiesChips"></select>
+                  </div>
+                  <div class="multi-picker hidden" id="changeRequestLabelsWrap">
+                    <div id="changeRequestLabelsChips" class="multi-chip-list"></div>
+                    <select id="changeRequestLabels" data-chip-target="changeRequestLabelsChips"></select>
+                  </div>
+                </label>
+                <div class="row row-actions">
+                  <button id="btnSaveChangeRequest" type="button">Soumettre la demande globale</button>
+                  <span id="changeRequestMsg" class="msg"></span>
+                </div>
+              </form>
+
+              <div class="history-box history-box-wide">
+                <div class="row history-head">
+                  <h4 style="margin-bottom:6px;">Historique des demandes</h4>
+                  <label style="margin:0; min-width:220px;">
+                    Filtrer par statut
+                    <select id="changeRequestStatusFilter">
+                      <option value="all">Tous</option>
+                      <option value="pending">En attente</option>
+                      <option value="approved">Approuvées</option>
+                      <option value="rejected">Refusées</option>
+                    </select>
+                  </label>
+                </div>
+                <span id="changeRequestSummary" class="muted"></span>
+                <div id="changeRequestsList" class="list"></div>
+              </div>
+            </section>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
