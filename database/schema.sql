@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS clients (
   slug VARCHAR(190) NULL,
   description_short TEXT NULL,
   description_long TEXT NULL,
+  gallery_images LONGTEXT NULL,
   is_public TINYINT(1) NOT NULL DEFAULT 1,
   public_updated_at DATETIME NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -322,55 +323,6 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
   INDEX idx_admin_audit_created_at (created_at),
   INDEX idx_admin_audit_actor (actor_type, actor_id),
   INDEX idx_admin_audit_action (action_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS client_consent_documents (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  client_id INT NOT NULL,
-  consent_type VARCHAR(40) NOT NULL,
-  file_path VARCHAR(255) NOT NULL,
-  original_filename VARCHAR(255) NULL,
-  file_hash VARCHAR(64) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'pending',
-  uploaded_by_user_id INT NULL,
-  reviewed_by_admin_id INT NULL,
-  reviewed_by_admin_name VARCHAR(120) NULL,
-  reviewed_at DATETIME NULL,
-  review_note TEXT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_client_consent_documents_client (client_id),
-  INDEX idx_client_consent_documents_status (status),
-  INDEX idx_client_consent_documents_type (consent_type),
-  INDEX idx_client_consent_documents_created (created_at),
-  CONSTRAINT fk_client_consent_documents_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-  CONSTRAINT fk_client_consent_documents_user FOREIGN KEY (uploaded_by_user_id) REFERENCES client_users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_client_consent_documents_admin FOREIGN KEY (reviewed_by_admin_id) REFERENCES admin_users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS supplier_consent_documents (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  supplier_id INT NOT NULL,
-  source_client_id INT NOT NULL,
-  file_path VARCHAR(255) NOT NULL,
-  original_filename VARCHAR(255) NULL,
-  file_hash VARCHAR(64) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'pending',
-  uploaded_by_user_id INT NULL,
-  reviewed_by_admin_id INT NULL,
-  reviewed_by_admin_name VARCHAR(120) NULL,
-  reviewed_at DATETIME NULL,
-  review_note TEXT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_supplier_consent_documents_supplier (supplier_id),
-  INDEX idx_supplier_consent_documents_client (source_client_id),
-  INDEX idx_supplier_consent_documents_status (status),
-  INDEX idx_supplier_consent_documents_created (created_at),
-  CONSTRAINT fk_supplier_consent_documents_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
-  CONSTRAINT fk_supplier_consent_documents_client FOREIGN KEY (source_client_id) REFERENCES clients(id) ON DELETE CASCADE,
-  CONSTRAINT fk_supplier_consent_documents_user FOREIGN KEY (uploaded_by_user_id) REFERENCES client_users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_supplier_consent_documents_admin FOREIGN KEY (reviewed_by_admin_id) REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO settings (setting_key, setting_value)

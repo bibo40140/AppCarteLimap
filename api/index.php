@@ -88,6 +88,22 @@ try {
             delete_client($pdo);
             break;
 
+        case 'admin/wordpress-sync/clients-resync':
+            require_admin();
+            if ($method !== 'POST' && $method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            resync_all_clients_to_wordpress($pdo);
+            break;
+
+        case 'admin/wordpress-sync/suppliers-resync':
+            require_admin();
+            if ($method !== 'POST' && $method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            resync_all_suppliers_to_wordpress($pdo);
+            break;
+
         case 'admin/producer/export':
             require_admin();
             export_producers_csv($pdo);
@@ -317,6 +333,14 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             upload_client_logo();
+            break;
+
+        case 'client/upload/gallery-images':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            upload_client_gallery_images();
             break;
 
         case 'client/geocode':
@@ -987,7 +1011,10 @@ function save_client(PDO $pdo): void
             VALUES
             (:name, :client_type, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :lundi, :mardi, :mercredi, :jeudi, :vendredi, :samedi, :dimanche, :website, :facebook_url, :instagram_url, :linkedin_url, :logo_url, :photo_cover_url, :slug, :description_short, :description_long, :is_public, :public_updated_at, :is_active)";
         $pdo->prepare($sql)->execute($payload);
+        $id = (int)$pdo->lastInsertId();
     }
+
+    sync_client_to_wordpress($pdo, $id);
 
     json_response(['ok' => true]);
 }
@@ -1000,7 +1027,692 @@ function delete_client(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'ID client invalide'], 422);
     }
     $pdo->prepare('UPDATE clients SET is_active=0 WHERE id=:id')->execute([':id' => $id]);
+    sync_client_to_wordpress($pdo, $id);
     json_response(['ok' => true]);
+}
+
+function resync_all_clients_to_wordpress(PDO $pdo): void
+{
+    @set_time_limit(120);
+
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $limit = (int)($_GET['limit'] ?? 30);
+    if ($limit <= 0 || $limit > 200) {
+        $limit = 30;
+    }
+
+    $total = (int)$pdo->query('SELECT COUNT(*) FROM clients')->fetchColumn();
+
+    $stmt = $pdo->prepare('SELECT id FROM clients ORDER BY id LIMIT :lim OFFSET :off');
+    $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $processed = 0;
+    foreach ($rows as $row) {
+        $clientId = (int)($row['id'] ?? 0);
+        if ($clientId <= 0) {
+            continue;
+        }
+        sync_client_to_wordpress($pdo, $clientId);
+        $processed++;
+    }
+
+    $nextOffset = $offset + count($rows);
+    $done = $nextOffset >= $total;
+
+    json_response([
+        'ok' => true,
+        'total' => $total,
+        'processed' => $processed,
+        'synced' => $processed,
+        'offset' => $offset,
+        'next_offset' => $nextOffset,
+        'done' => $done,
+    ]);
+}
+
+function sync_client_to_wordpress(PDO $pdo, int $clientId): void
+{
+    if ($clientId <= 0) {
+        return;
+    }
+
+    try {
+        $config = require __DIR__ . '/config.php';
+        $sync = is_array($config['wordpress_sync'] ?? null) ? $config['wordpress_sync'] : [];
+        $enabled = !empty($sync['enabled']);
+        if (!$enabled) {
+            return;
+        }
+
+        $endpoint = trim((string)($sync['endpoint'] ?? ''));
+        $secret = (string)($sync['secret'] ?? '');
+        $timeout = max(2, (int)($sync['timeout_seconds'] ?? 8));
+
+        if ($endpoint === '' || $secret === '') {
+            write_admin_audit($pdo, 'wordpress_sync_client_failed', [
+                'target_type' => 'client',
+                'target_id' => $clientId,
+                'details' => ['reason' => 'missing_config'],
+            ]);
+            return;
+        }
+
+        $payload = build_client_sync_payload($pdo, $clientId);
+        $variants = build_client_sync_payload_variants($payload);
+
+        $statusCode = 0;
+        $responseBody = '';
+        $acceptedVariant = -1;
+
+        foreach ($variants as $idx => $variantPayload) {
+            $json = json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($json)) {
+                continue;
+            }
+
+            $timestamp = (string)time();
+            $signature = hash_hmac('sha256', $timestamp . '.' . $json, $secret);
+            [$statusCode, $responseBody] = post_json_signed($endpoint, $json, $timestamp, $signature, $timeout);
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                $acceptedVariant = $idx;
+                break;
+            }
+
+            $responseText = (string)$responseBody;
+            if (stripos($responseText, 'missing_id_source') === false) {
+                // Do not continue fallback attempts for non-schema errors.
+                break;
+            }
+        }
+
+        if ($statusCode < 200 || $statusCode >= 300) {
+            throw new RuntimeException('HTTP ' . $statusCode . ' - ' . mb_substr((string)$responseBody, 0, 700));
+        }
+
+        write_admin_audit($pdo, 'wordpress_sync_client_ok', [
+            'target_type' => 'client',
+            'target_id' => $clientId,
+            'details' => [
+                'status_code' => $statusCode,
+                'variant' => $acceptedVariant,
+            ],
+        ]);
+    } catch (Throwable $e) {
+        write_admin_audit($pdo, 'wordpress_sync_client_failed', [
+            'target_type' => 'client',
+            'target_id' => $clientId,
+            'details' => [
+                'error' => $e->getMessage(),
+            ],
+        ]);
+        error_log('AppCarte WP sync failed for client #' . $clientId . ': ' . $e->getMessage());
+    }
+}
+
+function build_client_sync_payload(PDO $pdo, int $clientId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT id, name, slug, client_type, address, city, postal_code, country, latitude, longitude,
+                phone, email, website, facebook_url, instagram_url, linkedin_url,
+            logo_url, photo_cover_url, description_short, description_long, gallery_images,
+                lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche,
+                is_active, is_public, updated_at
+         FROM clients
+         WHERE id=:id
+         LIMIT 1'
+    );
+    $stmt->execute([':id' => $clientId]);
+    $client = $stmt->fetch();
+
+    if (!$client) {
+        return [
+            'id_source' => $clientId,
+            'public_visible' => false,
+            'deleted' => true,
+        ];
+    }
+
+    $publicVisible = is_client_publicly_visible($pdo, $clientId);
+
+    $name = (string)($client['name'] ?? '');
+    $slug = (string)($client['slug'] ?? '');
+    $clientType = (string)($client['client_type'] ?? '');
+    $address = (string)($client['address'] ?? '');
+    $city = (string)($client['city'] ?? '');
+    $postalCode = (string)($client['postal_code'] ?? '');
+    $country = (string)($client['country'] ?? '');
+    $phone = (string)($client['phone'] ?? '');
+    $email = (string)($client['email'] ?? '');
+    $website = (string)($client['website'] ?? '');
+    $facebookUrl = (string)($client['facebook_url'] ?? '');
+    $instagramUrl = (string)($client['instagram_url'] ?? '');
+    $linkedinUrl = (string)($client['linkedin_url'] ?? '');
+    $logoUrl = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
+    $coverUrl = absolutize_export_url($pdo, (string)($client['photo_cover_url'] ?? ''));
+    $descriptionShort = (string)($client['description_short'] ?? '');
+    $descriptionLong = (string)($client['description_long'] ?? '');
+    $galleryUrls = absolutize_gallery_images_list($pdo, (string)($client['gallery_images'] ?? ''));
+    $galleryImagesJson = $galleryUrls
+        ? json_encode(array_map(static fn(string $url): array => ['url' => $url], $galleryUrls), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        : '';
+    $lundi = (string)($client['lundi'] ?? '');
+    $mardi = (string)($client['mardi'] ?? '');
+    $mercredi = (string)($client['mercredi'] ?? '');
+    $jeudi = (string)($client['jeudi'] ?? '');
+    $vendredi = (string)($client['vendredi'] ?? '');
+    $samedi = (string)($client['samedi'] ?? '');
+    $dimanche = (string)($client['dimanche'] ?? '');
+
+    $operation = $publicVisible ? 'upsert' : 'delete';
+
+    $hoursFr = [
+        'lundi' => $lundi,
+        'mardi' => $mardi,
+        'mercredi' => $mercredi,
+        'jeudi' => $jeudi,
+        'vendredi' => $vendredi,
+        'samedi' => $samedi,
+        'dimanche' => $dimanche,
+    ];
+    $hoursEn = [
+        'monday' => $lundi,
+        'tuesday' => $mardi,
+        'wednesday' => $mercredi,
+        'thursday' => $jeudi,
+        'friday' => $vendredi,
+        'saturday' => $samedi,
+        'sunday' => $dimanche,
+    ];
+
+    $descriptionLongText = trim(strip_tags(html_entity_decode($descriptionLong, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+
+    return [
+        'id_source' => (int)$client['id'],
+        'name' => $name,
+        'slug' => $slug,
+        'type' => $clientType,
+        'client_type' => $clientType,
+        'address' => $address,
+        'city' => $city,
+        'postal_code' => $postalCode,
+        'country' => $country,
+        'latitude' => ($client['latitude'] ?? null) !== null ? (float)$client['latitude'] : null,
+        'longitude' => ($client['longitude'] ?? null) !== null ? (float)$client['longitude'] : null,
+        'phone' => $phone,
+        'email' => $email,
+        'website' => $website,
+        'facebook_url' => $facebookUrl,
+        'facebook' => $facebookUrl,
+        'instagram_url' => $instagramUrl,
+        'instagram' => $instagramUrl,
+        'linkedin_url' => $linkedinUrl,
+        'linkedin' => $linkedinUrl,
+        'logo_url' => $logoUrl,
+        'photo_cover_url' => $coverUrl,
+        'description_short' => $descriptionShort,
+        'description_long' => $descriptionLong,
+        'gallery_images' => $galleryImagesJson,
+        'description_long_text' => $descriptionLongText,
+        'wp_post_title' => $name,
+        'wp_post_name' => $slug,
+        'wp_post_excerpt' => $descriptionShort,
+        'wp_post_content' => $descriptionLong,
+        'wp_post_content_text' => $descriptionLongText,
+        'lundi' => $lundi,
+        'mardi' => $mardi,
+        'mercredi' => $mercredi,
+        'jeudi' => $jeudi,
+        'vendredi' => $vendredi,
+        'samedi' => $samedi,
+        'dimanche' => $dimanche,
+        'monday' => $lundi,
+        'tuesday' => $mardi,
+        'wednesday' => $mercredi,
+        'thursday' => $jeudi,
+        'friday' => $vendredi,
+        'saturday' => $samedi,
+        'sunday' => $dimanche,
+        'contact' => [
+            'phone' => $phone,
+            'email' => $email,
+        ],
+        'schedule' => $hoursFr,
+        'horaires' => $hoursFr,
+        'opening_hours' => $hoursEn,
+        'hours' => $hoursEn,
+        'websites' => [
+            'website' => $website,
+            'facebook_url' => $facebookUrl,
+            'instagram_url' => $instagramUrl,
+            'linkedin_url' => $linkedinUrl,
+            'facebook' => $facebookUrl,
+            'instagram' => $instagramUrl,
+            'linkedin' => $linkedinUrl,
+        ],
+        'social' => [
+            'website' => $website,
+            'facebook' => $facebookUrl,
+            'instagram' => $instagramUrl,
+            'linkedin' => $linkedinUrl,
+        ],
+        'is_active' => (int)($client['is_active'] ?? 0) === 1,
+        'is_public' => (int)($client['is_public'] ?? 0) === 1,
+        'operation' => $operation,
+        'event' => $operation,
+        'deleted' => !$publicVisible,
+        'visible' => $publicVisible,
+        'public_visible' => $publicVisible,
+        'updated_at' => (string)($client['updated_at'] ?? ''),
+        'client' => [
+            'id_source' => (int)$client['id'],
+            'name' => $name,
+            'slug' => $slug,
+            'type' => $clientType,
+            'address' => $address,
+            'city' => $city,
+            'postal_code' => $postalCode,
+            'country' => $country,
+            'latitude' => ($client['latitude'] ?? null) !== null ? (float)$client['latitude'] : null,
+            'longitude' => ($client['longitude'] ?? null) !== null ? (float)$client['longitude'] : null,
+            'phone' => $phone,
+            'email' => $email,
+            'website' => $website,
+            'facebook_url' => $facebookUrl,
+            'facebook' => $facebookUrl,
+            'instagram_url' => $instagramUrl,
+            'instagram' => $instagramUrl,
+            'linkedin_url' => $linkedinUrl,
+            'linkedin' => $linkedinUrl,
+            'logo_url' => $logoUrl,
+            'photo_cover_url' => $coverUrl,
+            'description_short' => $descriptionShort,
+            'description_long' => $descriptionLong,
+            'gallery_images' => $galleryImagesJson,
+            'description_long_text' => $descriptionLongText,
+            'lundi' => $lundi,
+            'mardi' => $mardi,
+            'mercredi' => $mercredi,
+            'jeudi' => $jeudi,
+            'vendredi' => $vendredi,
+            'samedi' => $samedi,
+            'dimanche' => $dimanche,
+            'monday' => $lundi,
+            'tuesday' => $mardi,
+            'wednesday' => $mercredi,
+            'thursday' => $jeudi,
+            'friday' => $vendredi,
+            'saturday' => $samedi,
+            'sunday' => $dimanche,
+            'schedule' => $hoursFr,
+            'horaires' => $hoursFr,
+            'opening_hours' => $hoursEn,
+            'hours' => $hoursEn,
+            'public_visible' => $publicVisible,
+            'operation' => $operation,
+        ],
+    ];
+}
+
+function is_client_publicly_visible(PDO $pdo, int $clientId): bool
+{
+    if ($clientId <= 0) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM clients c
+         WHERE c.id = :id
+           AND c.is_active = 1
+           AND EXISTS (
+               SELECT 1
+               FROM client_consents cc
+               WHERE cc.client_id = c.id
+                 AND cc.status = 'approved'
+                 AND cc.revoked_at IS NULL
+           )"
+    );
+    $stmt->execute([':id' => $clientId]);
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function is_supplier_publicly_visible(PDO $pdo, int $supplierId): bool
+{
+    if ($supplierId <= 0) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM suppliers s
+         WHERE s.id = :id
+           AND s.is_public = 1
+           AND EXISTS (
+               SELECT 1
+               FROM supplier_consents sc
+               WHERE sc.supplier_id = s.id
+                 AND sc.status = 'approved'
+                 AND sc.revoked_at IS NULL
+           )
+           AND (
+               NOT EXISTS (
+                   SELECT 1
+                   FROM client_suppliers cs0
+                   WHERE cs0.supplier_id = s.id
+               )
+               OR EXISTS (
+                   SELECT 1
+                   FROM client_suppliers cs1
+                   LEFT JOIN client_supplier_profiles csp1
+                     ON csp1.client_id = cs1.client_id
+                    AND csp1.supplier_id = cs1.supplier_id
+                   WHERE cs1.supplier_id = s.id
+                     AND COALESCE(csp1.relationship_status, 'active') <> 'inactive'
+               )
+           )"
+    );
+    $stmt->execute([':id' => $supplierId]);
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function resync_all_suppliers_to_wordpress(PDO $pdo): void
+{
+    @set_time_limit(120);
+
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $limit = (int)($_GET['limit'] ?? 30);
+    if ($limit <= 0 || $limit > 200) {
+        $limit = 30;
+    }
+
+    $total = (int)$pdo->query('SELECT COUNT(*) FROM suppliers')->fetchColumn();
+
+    $stmt = $pdo->prepare('SELECT id FROM suppliers ORDER BY id LIMIT :lim OFFSET :off');
+    $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $processed = 0;
+    foreach ($rows as $row) {
+        $supplierId = (int)($row['id'] ?? 0);
+        if ($supplierId <= 0) {
+            continue;
+        }
+        sync_supplier_to_wordpress($pdo, $supplierId);
+        $processed++;
+    }
+
+    $nextOffset = $offset + count($rows);
+    $done = $nextOffset >= $total;
+
+    json_response([
+        'ok' => true,
+        'total' => $total,
+        'processed' => $processed,
+        'synced' => $processed,
+        'offset' => $offset,
+        'next_offset' => $nextOffset,
+        'done' => $done,
+    ]);
+}
+
+function sync_supplier_to_wordpress(PDO $pdo, int $supplierId): void
+{
+    if ($supplierId <= 0) {
+        return;
+    }
+
+    try {
+        $config = require __DIR__ . '/config.php';
+
+        $clientSync = is_array($config['wordpress_sync'] ?? null) ? $config['wordpress_sync'] : [];
+        $supplierSync = is_array($config['wordpress_sync_suppliers'] ?? null) ? $config['wordpress_sync_suppliers'] : [];
+
+        $enabled = array_key_exists('enabled', $supplierSync)
+            ? !empty($supplierSync['enabled'])
+            : !empty($clientSync['enabled']);
+
+        if (!$enabled) {
+            return;
+        }
+
+        $endpoint = trim((string)($supplierSync['endpoint'] ?? ''));
+        if ($endpoint === '') {
+            $clientEndpoint = trim((string)($clientSync['endpoint'] ?? ''));
+            if ($clientEndpoint !== '') {
+                $endpoint = preg_replace('#/clients/?$#', '/suppliers', $clientEndpoint) ?? '';
+            }
+        }
+
+        $secret = (string)($supplierSync['secret'] ?? '');
+        if ($secret === '') {
+            $secret = (string)($clientSync['secret'] ?? '');
+        }
+
+        $timeout = (int)($supplierSync['timeout_seconds'] ?? ($clientSync['timeout_seconds'] ?? 8));
+        $timeout = max(2, $timeout);
+
+        if ($endpoint === '' || $secret === '') {
+            write_admin_audit($pdo, 'wordpress_sync_supplier_failed', [
+                'target_type' => 'supplier',
+                'target_id' => $supplierId,
+                'details' => ['reason' => 'missing_config'],
+            ]);
+            return;
+        }
+
+        $payload = build_supplier_sync_payload($pdo, $supplierId);
+        $variants = build_supplier_sync_payload_variants($payload);
+
+        $statusCode = 0;
+        $responseBody = '';
+        $acceptedVariant = -1;
+
+        foreach ($variants as $idx => $variantPayload) {
+            $json = json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($json)) {
+                continue;
+            }
+
+            $timestamp = (string)time();
+            $signature = hash_hmac('sha256', $timestamp . '.' . $json, $secret);
+            [$statusCode, $responseBody] = post_json_signed($endpoint, $json, $timestamp, $signature, $timeout);
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                $acceptedVariant = $idx;
+                break;
+            }
+
+            $responseText = (string)$responseBody;
+            if (stripos($responseText, 'missing_id_source') === false) {
+                break;
+            }
+        }
+
+        if ($statusCode < 200 || $statusCode >= 300) {
+            throw new RuntimeException('HTTP ' . $statusCode . ' - ' . mb_substr((string)$responseBody, 0, 700));
+        }
+
+        write_admin_audit($pdo, 'wordpress_sync_supplier_ok', [
+            'target_type' => 'supplier',
+            'target_id' => $supplierId,
+            'details' => [
+                'status_code' => $statusCode,
+                'variant' => $acceptedVariant,
+            ],
+        ]);
+    } catch (Throwable $e) {
+        write_admin_audit($pdo, 'wordpress_sync_supplier_failed', [
+            'target_type' => 'supplier',
+            'target_id' => $supplierId,
+            'details' => [
+                'error' => $e->getMessage(),
+            ],
+        ]);
+        error_log('AppCarte WP sync failed for supplier #' . $supplierId . ': ' . $e->getMessage());
+    }
+}
+
+function build_supplier_sync_payload(PDO $pdo, int $supplierId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT id, name, slug, supplier_type, activity_text, description_short, description_long,
+                address, city, postal_code, country, latitude, longitude,
+                phone, email, website, facebook_url, instagram_url, linkedin_url,
+                logo_url, photo_cover_url, is_public, updated_at
+         FROM suppliers
+         WHERE id=:id
+         LIMIT 1'
+    );
+    $stmt->execute([':id' => $supplierId]);
+    $supplier = $stmt->fetch();
+
+    if (!$supplier) {
+        return [
+            'event' => 'supplier_delete',
+            'id_source' => $supplierId,
+            'public_visible' => false,
+            'deleted' => true,
+        ];
+    }
+
+    $publicVisible = is_supplier_publicly_visible($pdo, $supplierId);
+    $operation = $publicVisible ? 'upsert' : 'delete';
+
+    $idSource = (int)($supplier['id'] ?? 0);
+    $name = (string)($supplier['name'] ?? '');
+    $slug = (string)($supplier['slug'] ?? '');
+    $supplierType = (string)($supplier['supplier_type'] ?? '');
+    $activityText = (string)($supplier['activity_text'] ?? '');
+    $descriptionShort = (string)($supplier['description_short'] ?? '');
+    $descriptionLong = (string)($supplier['description_long'] ?? '');
+    $address = (string)($supplier['address'] ?? '');
+    $city = (string)($supplier['city'] ?? '');
+    $postalCode = (string)($supplier['postal_code'] ?? '');
+    $country = (string)($supplier['country'] ?? '');
+    $phone = (string)($supplier['phone'] ?? '');
+    $email = (string)($supplier['email'] ?? '');
+    $website = (string)($supplier['website'] ?? '');
+    $facebookUrl = (string)($supplier['facebook_url'] ?? '');
+    $instagramUrl = (string)($supplier['instagram_url'] ?? '');
+    $linkedinUrl = (string)($supplier['linkedin_url'] ?? '');
+    $logoUrl = absolutize_export_url($pdo, (string)($supplier['logo_url'] ?? ''));
+    $coverUrl = absolutize_export_url($pdo, (string)($supplier['photo_cover_url'] ?? ''));
+
+    return [
+        'event' => $operation === 'delete' ? 'supplier_delete' : 'supplier_upsert',
+        'operation' => $operation,
+        'id_source' => $idSource,
+        'name' => $name,
+        'slug' => $slug,
+        'supplier_type' => $supplierType,
+        'activity_text' => $activityText,
+        'description_short' => $descriptionShort,
+        'description_long' => $descriptionLong,
+        'address' => $address,
+        'city' => $city,
+        'postal_code' => $postalCode,
+        'country' => $country,
+        'latitude' => ($supplier['latitude'] ?? null) !== null ? (float)$supplier['latitude'] : null,
+        'longitude' => ($supplier['longitude'] ?? null) !== null ? (float)$supplier['longitude'] : null,
+        'phone' => $phone,
+        'email' => $email,
+        'website' => $website,
+        'facebook_url' => $facebookUrl,
+        'instagram_url' => $instagramUrl,
+        'linkedin_url' => $linkedinUrl,
+        'logo_url' => $logoUrl,
+        'photo_cover_url' => $coverUrl,
+        'is_public' => (int)($supplier['is_public'] ?? 0) === 1,
+        'deleted' => !$publicVisible,
+        'public_visible' => $publicVisible,
+        'updated_at' => (string)($supplier['updated_at'] ?? ''),
+        'supplier' => [
+            'id_source' => $idSource,
+            'name' => $name,
+            'slug' => $slug,
+            'supplier_type' => $supplierType,
+            'activity_text' => $activityText,
+            'description_short' => $descriptionShort,
+            'description_long' => $descriptionLong,
+            'address' => $address,
+            'city' => $city,
+            'postal_code' => $postalCode,
+            'country' => $country,
+            'latitude' => ($supplier['latitude'] ?? null) !== null ? (float)$supplier['latitude'] : null,
+            'longitude' => ($supplier['longitude'] ?? null) !== null ? (float)$supplier['longitude'] : null,
+            'phone' => $phone,
+            'email' => $email,
+            'website' => $website,
+            'facebook_url' => $facebookUrl,
+            'instagram_url' => $instagramUrl,
+            'linkedin_url' => $linkedinUrl,
+            'logo_url' => $logoUrl,
+            'photo_cover_url' => $coverUrl,
+            'public_visible' => $publicVisible,
+            'operation' => $operation,
+        ],
+    ];
+}
+
+function post_json_signed(string $url, string $jsonBody, string $timestamp, string $signature, int $timeoutSeconds): array
+{
+    $headers = [
+        'Content-Type: application/json',
+        'X-Limap-Timestamp: ' . $timestamp,
+        'X-Limap-Signature: ' . $signature,
+    ];
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new RuntimeException('Unable to initialize cURL');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $jsonBody,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => $timeoutSeconds,
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException('cURL error: ' . $error);
+        }
+
+        $statusCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$statusCode, (string)$response];
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers),
+            'content' => $jsonBody,
+            'timeout' => $timeoutSeconds,
+            'ignore_errors' => true,
+        ],
+    ]);
+
+    $response = @file_get_contents($url, false, $context);
+    $statusCode = 0;
+    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
+        $statusCode = (int)$m[1];
+    }
+    return [$statusCode, $response === false ? '' : (string)$response];
 }
 
 function export_clients_csv(PDO $pdo): void
@@ -1042,7 +1754,25 @@ function export_producers_csv(PDO $pdo): void
     $params = [];
 
     if ($scope === 'changed' && $lastExportedAt !== '') {
-        $where[] = 'COALESCE(s.public_updated_at, s.updated_at) >= :since';
+                $where[] = "(
+                        COALESCE(s.public_updated_at, s.updated_at) >= :since
+                        OR NOT EXISTS (
+                                SELECT 1
+                                FROM supplier_consents scn
+                                WHERE scn.supplier_id = s.id
+                                    AND scn.status = 'approved'
+                                    AND scn.revoked_at IS NULL
+                        )
+                        OR EXISTS (
+                                SELECT 1
+                                FROM supplier_consents scu
+                                WHERE scu.supplier_id = s.id
+                                    AND (
+                                        (scu.approved_at IS NOT NULL AND scu.approved_at >= :since)
+                                        OR (scu.revoked_at IS NOT NULL AND scu.revoked_at >= :since)
+                                    )
+                        )
+                )";
         $params[':since'] = $lastExportedAt;
     }
 
@@ -1092,6 +1822,14 @@ function export_producers_csv(PDO $pdo): void
                     JOIN clients c ON c.id = cs.client_id
                     WHERE cs.supplier_id = s.id
                 ) AS client_names,
+                                (
+                                        SELECT 1
+                                        FROM supplier_consents sc
+                                        WHERE sc.supplier_id = s.id
+                                            AND sc.status = 'approved'
+                                            AND sc.revoked_at IS NULL
+                                        LIMIT 1
+                                ) AS consent_approved,
                 s.is_public,
                 s.public_updated_at,
                 s.updated_at
@@ -1127,17 +1865,23 @@ function export_producers_csv(PDO $pdo): void
     unset($row);
 
     $rows = array_map(function (array $row) {
+        $hasConsent = !empty($row['consent_approved']);
         $row['id_source'] = (int)$row['id'];
         unset($row['id']);
+        // WordPress import can map this to post status so non-consented suppliers are hidden.
+        $row['wp_post_status'] = $hasConsent ? 'publish' : 'draft';
+        $row['is_public'] = $hasConsent ? 1 : 0;
+        $row['consent_approved'] = $hasConsent ? 1 : 0;
         return $row;
     }, $rows);
 
     $headers = [
+        'wp_post_status',
         'id_source', 'name', 'slug', 'supplier_type', 'description_short', 'description_long',
         'address', 'city', 'postal_code', 'country', 'latitude', 'longitude',
         'phone', 'email', 'website', 'facebook_url', 'instagram_url', 'linkedin_url',
         'logo_url', 'photo_cover_url', 'activity_text', 'activity_names', 'activity_icons', 'labels', 'client_names',
-        'is_public', 'public_updated_at', 'updated_at'
+        'consent_approved', 'is_public', 'public_updated_at', 'updated_at'
     ];
 
     set_setting_value($pdo, 'producer_export_last_at', date('Y-m-d H:i:s'));
@@ -1846,11 +2590,85 @@ function upload_client_logo(): void
         json_response(['ok' => false, 'error' => 'Impossible de déplacer le fichier uploadé'], 500);
     }
 
-    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api')), '/');
-    $baseWebPath = preg_replace('#/api$#', '', $scriptDir);
-    $url = ($baseWebPath ?: '') . '/uploads/clients/' . $filename;
+    $url = '/uploads/clients/' . $filename;
 
     json_response(['ok' => true, 'url' => $url]);
+}
+
+function upload_client_gallery_images(): void
+{
+    if (empty($_FILES['images']) || !is_array($_FILES['images'])) {
+        json_response(['ok' => false, 'error' => 'Aucune image fournie'], 422);
+    }
+
+    $files = $_FILES['images'];
+    $names = $files['name'] ?? [];
+    $tmpNames = $files['tmp_name'] ?? [];
+    $errors = $files['error'] ?? [];
+    $sizes = $files['size'] ?? [];
+
+    if (!is_array($names)) {
+        $names = [$names];
+        $tmpNames = [$tmpNames];
+        $errors = [$errors];
+        $sizes = [$sizes];
+    }
+
+    if (!$names) {
+        json_response(['ok' => false, 'error' => 'Aucune image fournie'], 422);
+    }
+
+    $maxSize = 10 * 1024 * 1024;
+    $extByMime = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/gif' => 'gif',
+    ];
+
+    $rootDir = dirname(__DIR__);
+    $targetDir = $rootDir . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'clients';
+    if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+        json_response(['ok' => false, 'error' => 'Impossible de créer le dossier upload'], 500);
+    }
+
+    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api')), '/');
+    $baseWebPath = preg_replace('#/api$#', '', $scriptDir);
+
+    $urls = [];
+    foreach ($names as $idx => $name) {
+        $fileError = (int)($errors[$idx] ?? UPLOAD_ERR_NO_FILE);
+        if ($fileError !== UPLOAD_ERR_OK) {
+            continue;
+        }
+
+        $tmpPath = (string)($tmpNames[$idx] ?? '');
+        $size = (int)($sizes[$idx] ?? 0);
+        if ($tmpPath === '' || !is_uploaded_file($tmpPath) || $size <= 0 || $size > $maxSize) {
+            continue;
+        }
+
+        $mime = mime_content_type($tmpPath) ?: '';
+        if (!isset($extByMime[$mime])) {
+            continue;
+        }
+
+        $basename = 'gallery_' . date('Ymd_His') . '_' . bin2hex(random_bytes(5));
+        $filename = $basename . '.' . $extByMime[$mime];
+        $destPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+
+        if (!move_uploaded_file($tmpPath, $destPath)) {
+            continue;
+        }
+
+        $urls[] = '/uploads/clients/' . $filename;
+    }
+
+    if (!$urls) {
+        json_response(['ok' => false, 'error' => 'Aucune image valide téléversée'], 422);
+    }
+
+    json_response(['ok' => true, 'urls' => $urls]);
 }
 
 function upload_activity_icon(): void
@@ -2537,6 +3355,8 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
     sync_activity_links($pdo, $supplierId, $activityNames, $replaceTaxonomyLinks);
     sync_label_links($pdo, $supplierId, $labelNames, $replaceTaxonomyLinks);
 
+    sync_supplier_to_wordpress($pdo, $supplierId);
+
     return ['id' => $supplierId, 'existing' => (bool)$existing];
 }
 
@@ -2549,6 +3369,7 @@ function delete_supplier(PDO $pdo): void
     }
 
     $pdo->prepare('DELETE FROM suppliers WHERE id=:id')->execute([':id' => $id]);
+    sync_supplier_to_wordpress($pdo, $id);
     json_response(['ok' => true]);
 }
 
@@ -3223,7 +4044,7 @@ function client_bootstrap(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'client_id requis'], 422);
     }
 
-    $clientStmt = $pdo->prepare('SELECT id, name, client_type, logo_url, city, address, postal_code, country, latitude, longitude, phone, email, website, facebook_url, instagram_url, description_short, description_long FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
+    $clientStmt = $pdo->prepare('SELECT id, name, client_type, logo_url, city, address, postal_code, country, latitude, longitude, phone, email, website, facebook_url, instagram_url, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, description_short, description_long, gallery_images FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
     $clientStmt->execute([':id' => $clientId]);
     $client = $clientStmt->fetch();
     if (!$client) {
@@ -3231,6 +4052,10 @@ function client_bootstrap(PDO $pdo): void
     }
     $client['phone'] = format_phone($client['phone'] ?? '');
     $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
+    $galleryUrls = absolutize_gallery_images_list($pdo, (string)($client['gallery_images'] ?? ''));
+    $client['gallery_images'] = $galleryUrls
+        ? json_encode(array_map(static fn(string $url): array => ['url' => $url], $galleryUrls), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        : '';
 
     $clientConsentStmt = $pdo->prepare('SELECT status, consent_text_version, accepted_at
         FROM client_consents
@@ -3395,7 +4220,7 @@ function save_client_profile(PDO $pdo): void
         json_response(['ok' => false, 'error' => 'Nom client requis'], 422);
     }
 
-    $stmt = $pdo->prepare('SELECT id, name, client_type, email, phone, website, facebook_url, instagram_url, logo_url, address, city, postal_code, country, latitude, longitude, description_short, description_long FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, name, client_type, email, phone, website, facebook_url, instagram_url, logo_url, address, city, postal_code, country, latitude, longitude, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, description_short, description_long, gallery_images FROM clients WHERE id=:id AND is_active=1 LIMIT 1');
     $stmt->execute([':id' => $clientId]);
     $existingClient = $stmt->fetch();
     if (!$existingClient) {
@@ -3418,8 +4243,16 @@ function save_client_profile(PDO $pdo): void
         ':country' => trim((string)($input['country'] ?? '')),
         ':latitude' => ($input['latitude'] ?? '') !== '' ? (float)$input['latitude'] : null,
         ':longitude' => ($input['longitude'] ?? '') !== '' ? (float)$input['longitude'] : null,
+        ':lundi' => trim((string)($input['lundi'] ?? '')),
+        ':mardi' => trim((string)($input['mardi'] ?? '')),
+        ':mercredi' => trim((string)($input['mercredi'] ?? '')),
+        ':jeudi' => trim((string)($input['jeudi'] ?? '')),
+        ':vendredi' => trim((string)($input['vendredi'] ?? '')),
+        ':samedi' => trim((string)($input['samedi'] ?? '')),
+        ':dimanche' => trim((string)($input['dimanche'] ?? '')),
         ':description_short' => trim((string)($input['description_short'] ?? '')),
         ':description_long' => trim((string)($input['description_long'] ?? '')),
+        ':gallery_images' => trim((string)($input['gallery_images'] ?? '')),
     ];
 
     $pdo->prepare('UPDATE clients SET
@@ -3437,8 +4270,16 @@ function save_client_profile(PDO $pdo): void
         country=:country,
         latitude=:latitude,
         longitude=:longitude,
+        lundi=:lundi,
+        mardi=:mardi,
+        mercredi=:mercredi,
+        jeudi=:jeudi,
+        vendredi=:vendredi,
+        samedi=:samedi,
+        dimanche=:dimanche,
         description_short=:description_short,
         description_long=:description_long,
+        gallery_images=:gallery_images,
         public_updated_at=NOW()
         WHERE id=:id')
         ->execute($payload);
@@ -3446,7 +4287,9 @@ function save_client_profile(PDO $pdo): void
     $changedFields = [];
     foreach ([
         'name', 'client_type', 'email', 'phone', 'website', 'facebook_url', 'instagram_url', 'logo_url',
-        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude', 'description_short', 'description_long'
+        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude',
+        'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche',
+        'description_short', 'description_long', 'gallery_images'
     ] as $field) {
         $oldValue = (string)($existingClient[$field] ?? '');
         $newValue = (string)($payload[':' . $field] ?? '');
@@ -3465,6 +4308,10 @@ function save_client_profile(PDO $pdo): void
                 'changed_fields' => $changedFields,
             ],
         ]);
+
+        if (function_exists('sync_client_to_wordpress')) {
+            sync_client_to_wordpress($pdo, $clientId);
+        }
     }
 
     json_response(['ok' => true]);
@@ -4586,7 +5433,7 @@ function map_data(PDO $pdo): void
                             AND cc.revoked_at IS NULL
         )";
     }
-    $clients = $pdo->query('SELECT c.id, c.name, c.client_type, c.latitude, c.longitude, c.logo_url, c.city, c.address, c.postal_code, c.phone, c.email, c.lundi, c.mardi, c.mercredi, c.jeudi, c.vendredi, c.samedi, c.dimanche, c.website FROM clients c WHERE ' . $clientWhere . ' ORDER BY c.name')->fetchAll();
+    $clients = $pdo->query('SELECT c.id, c.name, c.client_type, c.latitude, c.longitude, c.logo_url, c.city, c.address, c.postal_code, c.phone, c.email, c.lundi, c.mardi, c.mercredi, c.jeudi, c.vendredi, c.samedi, c.dimanche, c.website, c.facebook_url, c.instagram_url, c.linkedin_url FROM clients c WHERE ' . $clientWhere . ' ORDER BY c.name')->fetchAll();
     $clients = array_map(function (array $client) use ($pdo): array {
         $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
         return $client;
@@ -4737,4 +5584,84 @@ function review_consent_request_DISABLED(PDO $pdo): void
         ':id' => $id,
     ]);
 
+}
+
+function build_client_sync_payload_variants(array $payload): array
+{
+    $variants = [];
+
+    // Variant 0: flat payload (current format).
+    $variants[] = $payload;
+
+    // Variant 1: nested under client key.
+    $variants[] = ['client' => $payload];
+
+    // Variant 2: nested under payload key.
+    $variants[] = ['payload' => $payload];
+
+    // Variant 3: explicit id_source + nested client body.
+    $variants[] = [
+        'id_source' => (int)($payload['id_source'] ?? 0),
+        'client' => $payload,
+    ];
+
+    // Variant 4: send only client object when present.
+    if (isset($payload['client']) && is_array($payload['client'])) {
+        $variants[] = $payload['client'];
+    }
+
+    return $variants;
+}
+
+function build_supplier_sync_payload_variants(array $payload): array
+{
+    $variants = [];
+
+    // Variant 0: flat payload.
+    $variants[] = $payload;
+
+    // Variant 1: nested under supplier key.
+    $variants[] = ['supplier' => $payload];
+
+    // Variant 2: nested under payload key.
+    $variants[] = ['payload' => $payload];
+
+    // Variant 3: explicit id_source + nested supplier body.
+    $variants[] = [
+        'id_source' => (int)($payload['id_source'] ?? 0),
+        'supplier' => is_array($payload['supplier'] ?? null) ? $payload['supplier'] : $payload,
+        'event' => (string)($payload['event'] ?? ''),
+        'public_visible' => !empty($payload['public_visible']),
+    ];
+
+    return $variants;
+}
+
+function absolutize_gallery_images_list(PDO $pdo, string $rawJson): array
+{
+    if (trim($rawJson) === '') {
+        return [];
+    }
+
+    $decoded = json_decode($rawJson, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $urls = [];
+    foreach ($decoded as $item) {
+        $rawUrl = '';
+        if (is_string($item)) {
+            $rawUrl = $item;
+        } elseif (is_array($item)) {
+            $rawUrl = (string)($item['url'] ?? '');
+        }
+
+        $abs = absolutize_export_url($pdo, $rawUrl);
+        if ($abs !== '') {
+            $urls[] = $abs;
+        }
+    }
+
+    return array_values(array_unique($urls));
 }

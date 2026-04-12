@@ -176,6 +176,7 @@
       <div class="row" style="margin-top:8px;">
         <button id="btnSaveVisual" class="primary">Enregistrer paramètres visuels</button>
         <button id="btnTestNotification" type="button">Tester envoi mail</button>
+        <button id="btnResyncWordpress" type="button">🔄 Resync WordPress</button>
         <span id="visualMsg" class="muted"></span>
       </div>
     </div>
@@ -401,8 +402,8 @@
       </div>
       <div class="row" style="margin-top:8px;">
         <button id="btnSaveSupplier" class="primary">Enregistrer fournisseur</button>
-        <button id="btnExportProducersAll" type="button">Exporter fournisseurs CSV</button>
-        <button id="btnExportProducersChanged" type="button">Exporter fournisseurs modifiés</button>
+        <button id="btnExportProducersAll" type="button">Exporter fournisseurs CSV (consentement validé)</button>
+        <button id="btnExportProducersChanged" type="button">Exporter fournisseurs modifiés (consentement validé)</button>
         <span id="supplierMsg" class="muted"></span>
       </div>
       <div class="card" style="margin-top:10px;">
@@ -487,10 +488,6 @@
         <h3 style="margin-top:16px;">Demandes de rattachement client-fournisseur</h3>
         <div id="supplierLinkRequestSummary" class="muted" style="margin-top:4px;"></div>
         <div id="supplierLinkRequestsTable" style="margin-top:8px;"></div>
-
-        <h3 style="margin-top:16px;">Documents de consentement</h3>
-        <div id="consentRequestSummary" class="muted" style="margin-top:4px;"></div>
-        <div id="consentRequestsTable" style="margin-top:8px;"></div>
       </div>
     </section>
 

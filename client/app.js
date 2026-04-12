@@ -3,6 +3,9 @@ const apiBase = '../api/index.php?action=';
 const state = {
   me: null,
   client: null,
+  clientGalleryDraft: [],
+  clientConsent: null,
+  supplierConsentHistory: [],
   suppliers: [],
   changeRequests: [],
   supplierCreateRequests: [],
@@ -17,8 +20,6 @@ const state = {
 const mapState = {
   map: null,
   marker: null,
-  supplierMap: null,
-  supplierMarker: null,
 };
 
 const q = (id) => document.getElementById(id);
@@ -323,6 +324,81 @@ function currentSupplier() {
   return state.suppliers.find((row) => Number(row.id) === Number(state.selectedSupplierId)) || null;
 }
 
+function selectSupplier(supplierId, tabName = null) {
+  state.selectedSupplierId = Number(supplierId || 0) || null;
+  const supplier = currentSupplier();
+  if (tabName) {
+    setClientTab(tabName);
+  }
+  renderSupplierList();
+  renderEditor();
+  renderSupplierConsentOverview();
+  renderSupplierCompletenessOverview();
+  if (supplier) {
+    trackUiEvent('ui_view_supplier', {
+      event_type: 'visit',
+      app: 'client',
+      page: 'client',
+      tab: tabName || 'my-suppliers',
+      meta: {
+        supplier_id: Number(supplier.id),
+        supplier_name: safe(supplier.name),
+      },
+    });
+  }
+}
+
+function supplierConsentBadgeKey(status) {
+  const normalized = safe(status).toLowerCase();
+  if (normalized === 'approved') return 'approved';
+  if (normalized === 'rejected') return 'rejected';
+  if (normalized === 'expired') return 'expired';
+  if (normalized === 'sent') return 'sent';
+  if (normalized === 'opened') return 'opened';
+  if (normalized === 'pending') return 'pending';
+  return 'none';
+}
+
+function statusLabel(status) {
+  const normalized = safe(status).toLowerCase();
+  if (normalized === 'approved') return 'Validé';
+  if (normalized === 'rejected') return 'Refusé';
+  if (normalized === 'expired') return 'Expiré';
+  if (normalized === 'sent') return 'Demande envoyée';
+  if (normalized === 'opened') return 'Demande ouverte';
+  if (normalized === 'pending') return 'En attente';
+  return 'Aucune demande';
+}
+
+function getSupplierConsentState(supplier) {
+  const status = safe(supplier?.supplier_consent_status).toLowerCase() || 'none';
+  const requestedAt = safe(supplier?.supplier_consent_requested_at);
+  const answeredAt = safe(supplier?.supplier_consent_answered_at);
+  const sourceClientName = safe(supplier?.supplier_consent_source_client_name);
+  return {
+    status,
+    badgeKey: supplierConsentBadgeKey(status),
+    label: statusLabel(status),
+    requestedAt,
+    answeredAt,
+    sourceClientName,
+    canSend: status === 'none',
+    canResend: ['rejected', 'expired', 'sent', 'opened', 'pending'].includes(status),
+    isApproved: status === 'approved',
+  };
+}
+
+function getSupplierMissingFields(supplier) {
+  const missing = [];
+  if (!safe(supplier?.name)) missing.push('nom');
+  if (!safe(supplier?.address) && !safe(supplier?.city) && !safe(supplier?.postal_code)) missing.push('adresse');
+  if (!safe(supplier?.latitude) || !safe(supplier?.longitude)) missing.push('coordonnées GPS');
+  if (!safe(supplier?.supplier_type)) missing.push('type');
+  if (!parseList(safe(supplier?.global_activity_text) || safe(supplier?.profile_activity_text)).length) missing.push('catégorie / activité');
+  if (!parseList(safe(supplier?.global_labels) || safe(supplier?.profile_labels_text)).length) missing.push('label');
+  return missing;
+}
+
 function renderReferenceSelects() {
   populateSelect(q('profileActivitySelect'), state.activities, { includeEmpty: true, emptyLabel: 'Ajouter une activité...' });
   populateSelect(q('profileLabelsSelect'), state.labels, { includeEmpty: true, emptyLabel: 'Ajouter un label...' });
@@ -354,13 +430,222 @@ function renderClientInfoForm() {
   q('clientInfoCity').value = safe(c.city);
   q('clientInfoPostal').value = safe(c.postal_code);
   q('clientInfoCountry').value = safe(c.country) || 'France';
+  q('clientInfoLundi').value = safe(c.lundi);
+  q('clientInfoMardi').value = safe(c.mardi);
+  q('clientInfoMercredi').value = safe(c.mercredi);
+  q('clientInfoJeudi').value = safe(c.jeudi);
+  q('clientInfoVendredi').value = safe(c.vendredi);
+  q('clientInfoSamedi').value = safe(c.samedi);
+  q('clientInfoDimanche').value = safe(c.dimanche);
   q('clientInfoLat').value = safe(c.latitude);
   q('clientInfoLng').value = safe(c.longitude);
   q('clientInfoDescriptionShort').value = safe(c.description_short);
   q('clientInfoDescriptionLong').value = safe(c.description_long);
+  state.clientGalleryDraft = parseGalleryImages(c.gallery_images);
+  q('clientInfoGalleryFiles').value = '';
+  renderClientGalleryPreview();
   syncLongTextEditorFromTextarea();
+  renderClientConsent();
 
   initOrUpdateClientMap();
+}
+
+function parseGalleryImages(rawValue) {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(String(rawValue));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item.url === 'string') return item.url;
+        return '';
+      })
+      .map((url) => safe(url))
+      .filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderGalleryPreview(urls, removable) {
+  const preview = q('clientInfoGalleryPreview');
+  if (!preview) return;
+  preview.innerHTML = '';
+
+  urls.forEach((url, idx) => {
+    const item = document.createElement('div');
+    item.className = 'gallery-preview-item';
+    item.innerHTML = `<img src="${url}" alt="image galerie" />`;
+
+    if (removable) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'gallery-preview-item-remove';
+      btn.textContent = 'x';
+      btn.dataset.idx = String(idx);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const fileInput = q('clientInfoGalleryFiles');
+        const dt = new DataTransfer();
+        Array.from(fileInput.files || []).forEach((f, i) => {
+          if (i !== Number(btn.dataset.idx)) {
+            dt.items.add(f);
+          }
+        });
+        fileInput.files = dt.files;
+        renderSelectedGalleryPreview();
+      });
+      item.appendChild(btn);
+    }
+
+    preview.appendChild(item);
+  });
+}
+
+function renderClientGalleryPreview() {
+  const preview = q('clientInfoGalleryPreview');
+  const fileInput = q('clientInfoGalleryFiles');
+  if (!preview || !fileInput) return;
+
+  preview.innerHTML = '';
+
+  const existingUrls = Array.isArray(state.clientGalleryDraft) ? state.clientGalleryDraft : [];
+  existingUrls.forEach((url, idx) => {
+    const item = document.createElement('div');
+    item.className = 'gallery-preview-item';
+    item.innerHTML = `<img src="${url}" alt="image galerie" />`;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gallery-preview-item-remove';
+    btn.textContent = 'x';
+    btn.title = 'Supprimer cette image';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.clientGalleryDraft = existingUrls.filter((_, i) => i !== idx);
+      renderClientGalleryPreview();
+    });
+
+    item.appendChild(btn);
+    preview.appendChild(item);
+  });
+
+  const selectedFiles = Array.from(fileInput.files || []);
+  selectedFiles.forEach((file, idx) => {
+    const blobUrl = URL.createObjectURL(file);
+    const item = document.createElement('div');
+    item.className = 'gallery-preview-item';
+
+    const img = document.createElement('img');
+    img.src = blobUrl;
+    img.alt = 'image galerie';
+    img.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
+    img.addEventListener('error', () => URL.revokeObjectURL(blobUrl), { once: true });
+    item.appendChild(img);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gallery-preview-item-remove';
+    btn.textContent = 'x';
+    btn.title = 'Retirer ce fichier';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const dt = new DataTransfer();
+      selectedFiles.forEach((f, i) => {
+        if (i !== idx) dt.items.add(f);
+      });
+      fileInput.files = dt.files;
+      renderClientGalleryPreview();
+    });
+
+    item.appendChild(btn);
+    preview.appendChild(item);
+  });
+}
+
+function renderSelectedGalleryPreview() {
+  renderClientGalleryPreview();
+}
+
+function renderClientConsent() {
+  const consent = state.clientConsent || {};
+  const status = safe(consent.status) || 'none';
+  const acceptedAt = safe(consent.accepted_at);
+  const version = safe(consent.version);
+
+  const checkbox = q('clientConsentCheckbox');
+  const btnConfirm = q('btnClientConsentConfirm');
+  const btnRevoke = q('btnClientConsentRevoke');
+  const statusHost = q('clientConsentStatus');
+
+  if (!checkbox || !btnConfirm || !btnRevoke || !statusHost) {
+    return;
+  }
+
+  checkbox.checked = false;
+
+  if (status === 'approved') {
+    statusHost.textContent = acceptedAt
+      ? `Consentement validé le ${acceptedAt}${version ? ` (version ${version})` : ''}`
+      : `Consentement validé${version ? ` (version ${version})` : ''}`;
+    btnConfirm.disabled = true;
+    checkbox.disabled = true;
+    btnRevoke.disabled = false;
+    return;
+  }
+
+  statusHost.textContent = 'Consentement non validé';
+  btnConfirm.disabled = false;
+  checkbox.disabled = false;
+  btnRevoke.disabled = true;
+}
+
+function sanitizePastedHtml(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+
+  const allowedTags = new Set(['p', 'h2', 'h3', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'a', 'br']);
+
+  function cleanNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.cloneNode();
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+    const tag = node.tagName.toLowerCase();
+
+    if (allowedTags.has(tag)) {
+      const el = document.createElement(tag);
+      if (tag === 'a') {
+        const href = node.getAttribute('href') || '';
+        if (href && /^https?:\/\//i.test(href)) {
+          el.setAttribute('href', href);
+          el.setAttribute('target', '_blank');
+          el.setAttribute('rel', 'noopener');
+        }
+      }
+      Array.from(node.childNodes).forEach((child) => {
+        const cleaned = cleanNode(child);
+        if (cleaned) el.appendChild(cleaned);
+      });
+      return el;
+    }
+
+    // Disallowed tag: unwrap, keep children
+    const frag = document.createDocumentFragment();
+    Array.from(node.childNodes).forEach((child) => {
+      const cleaned = cleanNode(child);
+      if (cleaned) frag.appendChild(cleaned);
+    });
+    return frag;
+  }
+
+  const result = document.createElement('div');
+  Array.from(tmp.childNodes).forEach((child) => {
+    const cleaned = cleanNode(child);
+    if (cleaned) result.appendChild(cleaned);
+  });
+
+  return result.innerHTML.trim() || '<p></p>';
 }
 
 function syncLongTextEditorFromTextarea() {
@@ -370,6 +655,32 @@ function syncLongTextEditorFromTextarea() {
 
   const html = String(source.value || '').trim();
   editor.innerHTML = html || '<p></p>';
+}
+
+function updateEditorToolbarState() {
+  const toolbar = q('clientInfoLongEditorToolbar');
+  if (!toolbar) return;
+
+  let currentBlock = '';
+  try {
+    currentBlock = (document.queryCommandValue('formatBlock') || '').toLowerCase();
+  } catch (_) { /* ignore */ }
+
+  toolbar.querySelectorAll('button[data-editor-cmd]').forEach((btn) => {
+    const cmd = safe(btn.getAttribute('data-editor-cmd'));
+    const arg = (btn.getAttribute('data-editor-arg') || '').toLowerCase();
+    try {
+      let on = false;
+      if (cmd === 'formatBlock') {
+        on = currentBlock === arg;
+      } else if (cmd === 'bold' || cmd === 'italic') {
+        on = document.queryCommandState(cmd);
+      }
+      btn.classList.toggle('active', on);
+    } catch (_) {
+      btn.classList.remove('active');
+    }
+  });
 }
 
 function syncLongTextTextareaFromEditor() {
@@ -590,30 +901,138 @@ function formatGlobalSupplier(s) {
   const contact = [safe(s.phone), safe(s.email)].filter(Boolean).join(' / ') || '-';
   const logo = safe(s.logo_url);
   const shortDescription = safe(s.description_short) || '-';
-  const lat = Number(s.latitude);
-  const lng = Number(s.longitude);
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
-
-  const consentBadge = getSupplierConsentBadgeHtml(s);
-  const mapButtonHtml = hasCoords
-    ? `<button type="button" class="view-map-btn" onclick="showSupplierMapModal(${Number(s.id)})">📍 Voir sur la carte</button>`
-    : '<span style="font-size:12px;color:#999;">📍 Position non disponible</span>';
 
   return [
     '<strong>Fiche globale</strong>',
-    '<div style="margin:8px 0;display:flex;gap:8px;align-items:center;">',
-    consentBadge,
-    '</div>',
     (logo ? '<div style="margin:6px 0;"><img src="' + logo + '" alt="logo producteur" style="max-height:46px;max-width:160px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px;padding:2px;background:#fff;"></div>' : ''),
     '<div><b>Type:</b> ' + type + '</div>',
     '<div><b>Activites:</b> ' + acts + '</div>',
     '<div><b>Labels:</b> ' + labels + '</div>',
     '<div><b>Description courte:</b> ' + shortDescription + '</div>',
     '<div><b>Contact:</b> ' + contact + '</div>',
-    '<div style="margin-top:12px;">',
-    mapButtonHtml,
-    '</div>',
   ].join('');
+}
+
+function renderSupplierConsentOverview() {
+  const host = q('supplierConsentOverviewList');
+  const summary = q('supplierConsentOverviewSummary');
+  if (!host || !summary) return;
+
+  const rows = state.suppliers.slice().sort((a, b) => safe(a.name).localeCompare(safe(b.name), 'fr'));
+  const counts = {
+    approved: 0,
+    pending: 0,
+    none: 0,
+  };
+
+  rows.forEach((supplier) => {
+    const consent = getSupplierConsentState(supplier);
+    if (consent.isApproved) counts.approved += 1;
+    else if (consent.status === 'none') counts.none += 1;
+    else counts.pending += 1;
+  });
+
+  summary.textContent = `${rows.length} fournisseur(s) liés | ${counts.approved} validé(s) | ${counts.pending} en cours | ${counts.none} à lancer`;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucun fournisseur lié.</div></div>';
+    return;
+  }
+
+  host.innerHTML = rows.map((supplier) => {
+    const consent = getSupplierConsentState(supplier);
+    const relationship = relationshipStatusLabel(safe(supplier.relationship_status) || 'active');
+    const location = [safe(supplier.city), safe(supplier.address)].filter(Boolean).join(' - ') || 'Localisation non renseignée';
+    const consentInfo = consent.isApproved
+      ? (consent.answeredAt ? `Validé le ${escapeHtml(consent.answeredAt)}` : 'Consentement validé')
+      : consent.requestedAt
+        ? `Dernière demande le ${escapeHtml(consent.requestedAt)}`
+        : 'Aucune demande envoyée';
+    const sourceInfo = consent.sourceClientName ? `Demande portée par ${escapeHtml(consent.sourceClientName)}` : '';
+    return [
+      '<article class="overview-card">',
+      '<div class="overview-head">',
+      '<div>',
+      '<div class="overview-title">' + escapeHtml(safe(supplier.name) || '(sans nom)') + '</div>',
+      '<div class="overview-meta">' + escapeHtml(location) + ' | relation: ' + escapeHtml(relationship) + '</div>',
+      '<div class="overview-meta">' + consentInfo + (sourceInfo ? ' | ' + sourceInfo : '') + '</div>',
+      '</div>',
+      '<span class="status-badge ' + consent.badgeKey + '">' + escapeHtml(consent.label) + '</span>',
+      '</div>',
+      '<div class="overview-actions">',
+      '<button type="button" data-open-supplier="' + Number(supplier.id) + '">Ouvrir la fiche</button>',
+      (!consent.isApproved ? '<button type="button" class="primary" data-send-consent="' + Number(supplier.id) + '">' + (consent.canSend ? 'Envoyer la demande' : 'Relancer la demande') + '</button>' : ''),
+      '</div>',
+      '</article>',
+    ].join('');
+  }).join('');
+
+  host.querySelectorAll('[data-open-supplier]').forEach((el) => {
+    el.addEventListener('click', () => {
+      selectSupplier(Number(el.getAttribute('data-open-supplier')), 'my-suppliers');
+    });
+  });
+
+  host.querySelectorAll('[data-send-consent]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      showMsg('supplierConsentOverviewMsg', '');
+      try {
+        const supplierId = Number(el.getAttribute('data-send-consent'));
+        selectSupplier(supplierId, 'supplier-consents');
+        await onSendSupplierConsentSingle();
+        renderSupplierConsentOverview();
+        showMsg('supplierConsentOverviewMsg', 'Demande envoyée.');
+      } catch (e) {
+        showMsg('supplierConsentOverviewMsg', e.message, true);
+      }
+    });
+  });
+}
+
+function renderSupplierCompletenessOverview() {
+  const host = q('supplierCompletenessList');
+  const summary = q('supplierCompletenessSummary');
+  if (!host || !summary) return;
+
+  const rows = state.suppliers
+    .map((supplier) => ({ supplier, missing: getSupplierMissingFields(supplier) }))
+    .filter((entry) => entry.missing.length > 0)
+    .sort((a, b) => b.missing.length - a.missing.length || safe(a.supplier.name).localeCompare(safe(b.supplier.name), 'fr'));
+
+  summary.textContent = rows.length
+    ? `${rows.length} fournisseur(s) ont encore des informations à compléter.`
+    : 'Toutes les fiches liées ont déjà le socle de données attendu.';
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucune fiche incomplète.</div></div>';
+    return;
+  }
+
+  host.innerHTML = rows.map(({ supplier, missing }) => {
+    const relationship = relationshipStatusLabel(safe(supplier.relationship_status) || 'active');
+    const consent = getSupplierConsentState(supplier);
+    return [
+      '<article class="overview-card">',
+      '<div class="overview-head">',
+      '<div>',
+      '<div class="overview-title">' + escapeHtml(safe(supplier.name) || '(sans nom)') + '</div>',
+      '<div class="overview-meta">Relation: ' + escapeHtml(relationship) + ' | consentement: ' + escapeHtml(consent.label) + '</div>',
+      '</div>',
+      '<span class="status-badge none">' + missing.length + ' champ(s) à compléter</span>',
+      '</div>',
+      '<div class="overview-tags">' + missing.map((item) => '<span class="overview-tag">' + escapeHtml(item) + '</span>').join('') + '</div>',
+      '<div class="overview-actions">',
+      '<button type="button" data-open-complete-supplier="' + Number(supplier.id) + '">Compléter la fiche</button>',
+      '</div>',
+      '</article>',
+    ].join('');
+  }).join('');
+
+  host.querySelectorAll('[data-open-complete-supplier]').forEach((el) => {
+    el.addEventListener('click', () => {
+      selectSupplier(Number(el.getAttribute('data-open-complete-supplier')), 'my-suppliers');
+    });
+  });
 }
 
 function renderSupplierList() {
@@ -638,29 +1057,10 @@ function renderSupplierList() {
       const rel = safe(s.relationship_status) || 'active';
       const relLabel = relationshipStatusLabel(rel);
       const city = safe(s.city) || '-';
-      const consentStatus = safe(s.supplier_consent_status || 'none');
-      let consentBadgeClass = '';
-      let consentBadgeLabel = '';
-
-      if (consentStatus === 'approved') {
-        consentBadgeClass = 'supplier-list-item-badge approved';
-        consentBadgeLabel = '✓ Signé';
-      } else if (consentStatus === 'sent' || consentStatus === 'opened') {
-        consentBadgeClass = 'supplier-list-item-badge pending';
-        consentBadgeLabel = '⧐ En attente';
-      } else if (consentStatus === 'rejected' || consentStatus === 'expired') {
-        consentBadgeClass = 'supplier-list-item-badge pending';
-        consentBadgeLabel = '✕ Refusé';
-      } else {
-        consentBadgeClass = 'supplier-list-item-badge';
-        consentBadgeLabel = '⊘ Non demandé';
-      }
-
       return [
         '<div class="list-item ' + (isActive ? 'active' : '') + '" data-id="' + Number(s.id) + '">',
         '<div class="list-main">' + (safe(s.name) || '(sans nom)') + '</div>',
         '<div class="list-sub">' + city + ' - statut: ' + relLabel + '</div>',
-        '<div class="' + consentBadgeClass + '">' + consentBadgeLabel + '</div>',
         '</div>',
       ].join('');
     })
@@ -668,20 +1068,7 @@ function renderSupplierList() {
 
   host.querySelectorAll('.list-item[data-id]').forEach((el) => {
     el.addEventListener('click', () => {
-      state.selectedSupplierId = Number(el.getAttribute('data-id'));
-      const supplier = state.suppliers.find((row) => Number(row.id) === Number(state.selectedSupplierId));
-      trackUiEvent('ui_view_supplier', {
-        event_type: 'visit',
-        app: 'client',
-        page: 'client',
-        tab: 'my-suppliers',
-        meta: {
-          supplier_id: Number(state.selectedSupplierId),
-          supplier_name: safe(supplier?.name),
-        },
-      });
-      renderSupplierList();
-      renderEditor();
+      selectSupplier(Number(el.getAttribute('data-id')));
     });
   });
 }
@@ -691,12 +1078,14 @@ function renderEditor() {
   const form = q('profileForm');
   const global = q('supplierGlobal');
   const reqSection = q('changeRequestSection');
+  const consentBox = q('supplierConsentBox');
 
   if (!s) {
     q('editorTitle').textContent = 'Profil client fournisseur';
     q('editorHint').textContent = 'Selectionnez un fournisseur a gauche.';
     form.classList.add('hidden');
     global.classList.add('hidden');
+    consentBox?.classList.add('hidden');
     reqSection.classList.add('hidden');
     q('changeRequestsList').innerHTML = '';
     return;
@@ -707,6 +1096,7 @@ function renderEditor() {
 
   global.innerHTML = formatGlobalSupplier(s);
   global.classList.remove('hidden');
+  renderSupplierConsentBox(s);
 
   q('profileSupplierId').value = String(Number(s.id));
 
@@ -739,10 +1129,33 @@ function renderEditor() {
   renderChangeRequestsForSelectedSupplier();
 }
 
-function statusLabel(status) {
-  if (status === 'approved') return 'Approuvée';
-  if (status === 'rejected') return 'Refusée';
-  return 'En attente';
+function renderSupplierConsentBox(supplier) {
+  const box = q('supplierConsentBox');
+  const statusHost = q('supplierConsentStatus');
+  const btnSend = q('btnSendSupplierConsentSingle');
+  if (!box || !statusHost || !btnSend) return;
+  if (!supplier || !supplier.id) {
+    box.classList.add('hidden');
+    return;
+  }
+
+  const supplierId = Number(supplier.id);
+  const history = (state.supplierConsentHistory || []).filter((row) => Number(row.supplier_id) === supplierId);
+  const hasApproved = history.some((row) => Number(row.consent_id || 0) > 0);
+  const latest = history.length ? history[0] : null;
+
+  if (hasApproved) {
+    statusHost.textContent = 'Consentement validé pour ce fournisseur.';
+    btnSend.disabled = true;
+  } else if (latest) {
+    statusHost.textContent = 'Dernière demande: ' + statusLabel(safe(latest.status)) + ' le ' + safe(latest.requested_at);
+    btnSend.disabled = false;
+  } else {
+    statusHost.textContent = 'Aucune demande envoyée pour ce fournisseur.';
+    btnSend.disabled = false;
+  }
+
+  box.classList.remove('hidden');
 }
 
 function relationshipStatusLabel(status) {
@@ -812,11 +1225,18 @@ async function loadSupplierLinkRequests() {
   state.supplierLinkRequests = Array.isArray(res.requests) ? res.requests : [];
 }
 
+async function loadSupplierConsentHistory() {
+  const query = buildClientScopeQuery();
+  const res = await api('client/supplier-consent/history', 'GET', null, query);
+  state.supplierConsentHistory = Array.isArray(res.history) ? res.history : [];
+}
+
 async function loadBootstrap() {
   const query = buildClientScopeQuery();
 
   const res = await api('client/bootstrap', 'GET', null, query);
   state.client = res.client || null;
+  state.clientConsent = res.client_consent || (res.consents && res.consents.client_consent) || null;
   state.suppliers = Array.isArray(res.suppliers) ? res.suppliers : [];
   state.activities = Array.isArray(res.activities) ? res.activities.map((item) => safe(item.name || item)).filter(Boolean) : [];
   state.labels = Array.isArray(res.labels) ? res.labels.map((item) => safe(item.name || item)).filter(Boolean) : [];
@@ -830,7 +1250,8 @@ async function loadBootstrap() {
   renderClientHeader();
   renderClientInfoForm();
   renderSupplierList();
-  renderIncompleteSuppliers();
+  renderSupplierConsentOverview();
+  renderSupplierCompletenessOverview();
   renderEditor();
 
   try {
@@ -854,6 +1275,124 @@ async function loadBootstrap() {
     console.error('loadSupplierLinkRequests error:', e);
   }
   renderSupplierLinkRequests();
+
+  try {
+    await loadSupplierConsentHistory();
+  } catch (e) {
+    console.error('loadSupplierConsentHistory error:', e);
+  }
+  renderSupplierConsentOverview();
+  renderEditor();
+}
+
+async function onSendSupplierConsentSingle() {
+  showMsg('supplierConsentMsg', '');
+  try {
+    const supplier = currentSupplier();
+    const supplierId = Number(supplier?.id || 0);
+    if (!supplierId) {
+      throw new Error('Sélectionnez un fournisseur');
+    }
+
+    await api('client/supplier-consent/send', 'POST', {
+      supplier_id: supplierId,
+    }, buildClientScopeQuery());
+
+    await loadSupplierConsentHistory();
+    const supplierRow = state.suppliers.find((row) => Number(row.id) === supplierId);
+    if (supplierRow) {
+      supplierRow.supplier_consent_status = 'sent';
+      supplierRow.supplier_consent_requested_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      supplierRow.supplier_consent_source_client_name = safe(state.client?.name);
+    }
+    renderSupplierConsentBox(supplier);
+    renderSupplierConsentOverview();
+    showMsg('supplierConsentMsg', `Demande envoyée à ${formatNowTime()}`);
+  } catch (e) {
+    showMsg('supplierConsentMsg', e.message, true);
+    throw e;
+  }
+}
+
+async function onSendAllSupplierConsents() {
+  showMsg('supplierConsentOverviewMsg', '');
+  try {
+    const toSend = state.suppliers.filter((supplier) => {
+      const consent = getSupplierConsentState(supplier);
+      return !consent.isApproved;
+    });
+
+    if (!toSend.length) {
+      showMsg('supplierConsentOverviewMsg', 'Tous les fournisseurs ont déjà validé leur consentement.');
+      return;
+    }
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const supplier of toSend) {
+      try {
+        const supplierId = Number(supplier.id);
+        await api('client/supplier-consent/send', 'POST', {
+          supplier_id: supplierId,
+        }, buildClientScopeQuery());
+
+        const supplierRow = state.suppliers.find((row) => Number(row.id) === supplierId);
+        if (supplierRow) {
+          supplierRow.supplier_consent_status = 'sent';
+          supplierRow.supplier_consent_requested_at = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          supplierRow.supplier_consent_source_client_name = safe(state.client?.name);
+        }
+        sent += 1;
+      } catch (e) {
+        console.error(`Erreur envoi consentement fournisseur ${supplier.id}:`, e);
+        failed += 1;
+      }
+    }
+
+    renderSupplierConsentOverview();
+    let msg = `${sent} demande(s) envoyée(s)`;
+    if (failed > 0) {
+      msg += ` | ${failed} erreur(s)`;
+    }
+    showMsg('supplierConsentOverviewMsg', msg);
+  } catch (e) {
+    showMsg('supplierConsentOverviewMsg', e.message, true);
+  }
+}
+
+async function onConfirmClientConsent() {
+  showMsg('clientConsentMsg', '');
+  try {
+    if (!q('clientConsentCheckbox')?.checked) {
+      throw new Error('Cochez la case avant de valider');
+    }
+
+    const currentVersion = safe(state.clientConsent?.version) || '2026-04-v1';
+    await api('client/consent/confirm', 'POST', {
+      accept: true,
+      text_version: currentVersion,
+    }, buildClientScopeQuery());
+
+    await loadBootstrap();
+    showMsg('clientConsentMsg', `Consentement validé à ${formatNowTime()}`);
+  } catch (e) {
+    showMsg('clientConsentMsg', e.message, true);
+  }
+}
+
+async function onRevokeClientConsent() {
+  showMsg('clientConsentMsg', '');
+  try {
+    await api('client/consent/revoke', 'POST', {
+      reason: 'Révocation depuis espace client',
+    }, buildClientScopeQuery());
+
+    await loadBootstrap();
+    showMsg('clientConsentMsg', `Consentement révoqué à ${formatNowTime()}`);
+  } catch (e) {
+    showMsg('clientConsentMsg', e.message, true);
+  }
 }
 
 async function onSearchSupplierLinkCandidates() {
@@ -997,6 +1536,18 @@ async function onSaveClientInfo() {
       logoUrl = safe(up.url);
     }
 
+    let galleryImages = Array.isArray(state.clientGalleryDraft) ? state.clientGalleryDraft.slice() : [];
+    const galleryFiles = Array.from(q('clientInfoGalleryFiles').files || []);
+    if (galleryFiles.length > 0) {
+      const form = new FormData();
+      galleryFiles.forEach((file) => {
+        form.append('images[]', file);
+      });
+      const up = await apiForm('client/upload/gallery-images', form, buildClientScopeQuery());
+      const uploadedUrls = Array.isArray(up.urls) ? up.urls.map((u) => safe(u)).filter(Boolean) : [];
+      galleryImages = galleryImages.concat(uploadedUrls);
+    }
+
     const payload = {
       client_id: resolveContextClientId(),
       name: safe(q('clientInfoName').value),
@@ -1011,14 +1562,25 @@ async function onSaveClientInfo() {
       city: safe(q('clientInfoCity').value),
       postal_code: safe(q('clientInfoPostal').value),
       country: safe(q('clientInfoCountry').value),
+      lundi: safe(q('clientInfoLundi').value),
+      mardi: safe(q('clientInfoMardi').value),
+      mercredi: safe(q('clientInfoMercredi').value),
+      jeudi: safe(q('clientInfoJeudi').value),
+      vendredi: safe(q('clientInfoVendredi').value),
+      samedi: safe(q('clientInfoSamedi').value),
+      dimanche: safe(q('clientInfoDimanche').value),
       latitude: safe(q('clientInfoLat').value),
       longitude: safe(q('clientInfoLng').value),
       description_short: safe(q('clientInfoDescriptionShort').value),
       description_long: safe(q('clientInfoDescriptionLong').value),
+      gallery_images: JSON.stringify(galleryImages.map((url) => ({ url }))),
     };
 
     await api('client/profile/save', 'POST', payload);
     q('clientInfoLogoFile').value = '';
+    q('clientInfoGalleryFiles').value = '';
+    state.clientGalleryDraft = [];
+    q('clientInfoGalleryPreview').innerHTML = '';
     await loadBootstrap();
     showMsg('clientInfoMsg', `Fiche client mise à jour à ${formatNowTime()}`);
   } catch (e) {
@@ -1176,171 +1738,6 @@ async function onSaveChangeRequest() {
   }
 }
 
-function getSupplierConsentBadgeHtml(supplier) {
-  const status = safe(supplier.supplier_consent_status || 'none');
-  let badgeClass = 'consent-badge none';
-  let badgeLabel = 'Non signé';
-
-  if (status === 'approved') {
-    badgeClass = 'consent-badge approved';
-    badgeLabel = '✓ Signé';
-  } else if (status === 'sent' || status === 'opened') {
-    badgeClass = 'consent-badge pending';
-    badgeLabel = '⧐ En attente';
-  } else if (status === 'rejected' || status === 'expired') {
-    badgeClass = 'consent-badge pending';
-    badgeLabel = '✕ Refusé';
-  }
-
-  return `<span class="${badgeClass}">${badgeLabel}</span>`;
-}
-
-function showSupplierMapModal(supplierId) {
-  const supplier = state.suppliers.find((s) => Number(s.id) === Number(supplierId));
-  if (!supplier) return;
-
-  const lat = Number(supplier.latitude);
-  const lng = Number(supplier.longitude);
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
-
-  const modal = q('supplierMapModal');
-  const mapContainer = q('supplierMapContainer');
-  const consentInfo = q('mapConsentInfo');
-  const addressInfo = q('mapAddressInfo');
-
-  q('mapModalTitle').textContent = `Localisation - ${escapeHtml(safe(supplier.name))}`;
-
-  // Ensure map container is visible
-  mapContainer.style.display = 'block';
-
-  // Get consent badge
-  const consentStatus = safe(supplier.supplier_consent_status || 'none');
-  let consentHtml = '';
-  if (consentStatus === 'approved') {
-    consentHtml = '<strong style="color:#155724;">✓ Consentement signé</strong><p>Ce fournisseur a signé le consentement RGPD.</p>';
-  } else if (consentStatus === 'sent' || consentStatus === 'opened') {
-    consentHtml = '<strong style="color:#856404;">⧐ Consentement en attente</strong><p>Une demande de consentement RGPD a été envoyée au fournisseur.</p>';
-  } else if (consentStatus === 'rejected' || consentStatus === 'expired') {
-    consentHtml = '<strong style="color:#a94442;">✕ Consentement refusé ou expiré</strong><p>Le fournisseur a refusé ou le délai a expiré.</p>';
-  } else {
-    consentHtml = '<strong style="color:#383d41;">⊘ Aucun consentement demandé</strong><p>Aucune demande de consentement RGPD n\'a encore été envoyée.</p>';
-  }
-  consentInfo.innerHTML = consentHtml;
-
-  // Build address display
-  const addressParts = [
-    safe(supplier.address),
-    safe(supplier.postal_code),
-    safe(supplier.city),
-    safe(supplier.country),
-  ].filter(Boolean);
-  addressInfo.textContent = addressParts.length ? `Adresse: ${addressParts.join(', ')}` : 'Adresse incomplète';
-
-  // Show modal
-  modal.classList.remove('hidden');
-
-  // Initialize or update Leaflet map
-  if (!mapState.supplierMap) {
-    mapState.supplierMap = L.map('supplierMapContainer');
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(mapState.supplierMap);
-  }
-
-  // Clear previous markers
-  if (mapState.supplierMarker) {
-    mapState.supplierMarker.remove();
-  }
-
-  // Set center and add marker
-  const center = hasCoords ? [lat, lng] : [43.7102, -1.0553];
-  const zoom = hasCoords ? 15 : 8;
-
-  mapState.supplierMap.setView(center, zoom);
-  mapState.supplierMap.invalidateSize(false);
-
-  if (hasCoords) {
-    mapState.supplierMarker = L.marker([lat, lng])
-      .bindPopup(`<strong>${escapeHtml(safe(supplier.name))}</strong><br>${escapeHtml(addressParts.join(', '))}`)
-      .addTo(mapState.supplierMap)
-      .openPopup();
-  }
-}
-
-function hideSupplierMapModal() {
-  const modal = q('supplierMapModal');
-  if (modal) {
-    modal.classList.add('hidden');
-  }
-}
-
-function ensureIncompleteSuppliersPanelExists() {
-  if (document.getElementById('panel-incomplete-suppliers')) {
-    return;
-  }
-
-  const suppliersPanel = document.getElementById('panel-my-suppliers');
-  if (!suppliersPanel || !suppliersPanel.parentNode) {
-    return;
-  }
-
-  const panel = document.createElement('section');
-  panel.className = 'card client-tab-panel';
-  panel.id = 'panel-incomplete-suppliers';
-  panel.style.marginBottom = '14px';
-  panel.innerHTML = [
-    '<div class="section-head">',
-    '<div>',
-    '<div class="section-kicker">Resume</div>',
-    '<h3>Fournisseurs a completer</h3>',
-    '</div>',
-    '<p class="muted section-head-copy">Synthese des informations essentielles manquantes pour l affichage carte.</p>',
-    '</div>',
-    '<div id="incompleteSuppliersList" class="list"></div>',
-  ].join('');
-
-  suppliersPanel.parentNode.insertBefore(panel, suppliersPanel);
-}
-
-function getSupplierMissingFields(supplier) {
-  const missing = [];
-  if (!safe(supplier.address)) missing.push('adresse');
-  if (!safe(supplier.postal_code)) missing.push('code postal');
-  if (!safe(supplier.city)) missing.push('ville');
-  if (!safe(supplier.country)) missing.push('pays');
-
-  const lat = Number(supplier.latitude);
-  const lng = Number(supplier.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) missing.push('coordonnees');
-
-  return missing;
-}
-
-function renderIncompleteSuppliers() {
-  ensureIncompleteSuppliersPanelExists();
-  const host = q('incompleteSuppliersList');
-  if (!host) return;
-
-  const incompleteRows = (state.suppliers || [])
-    .map((supplier) => ({ supplier, missing: getSupplierMissingFields(supplier) }))
-    .filter((item) => item.missing.length > 0);
-
-  if (!incompleteRows.length) {
-    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucun fournisseur incomplet.</div></div>';
-    return;
-  }
-
-  host.innerHTML = incompleteRows.map((item) => {
-    const supplier = item.supplier;
-    return [
-      '<div class="list-item">',
-      '<div class="list-main">' + escapeHtml(safe(supplier.name) || '(sans nom)') + '</div>',
-      '<div class="list-sub"><b>Manque:</b> ' + escapeHtml(item.missing.join(', ')) + '</div>',
-      '</div>',
-    ].join('');
-  }).join('');
-}
-
 function bindEvents() {
   bindClientTabs();
   q('btnLogin').addEventListener('click', onLogin);
@@ -1353,12 +1750,22 @@ function bindEvents() {
   q('btnLogout').addEventListener('click', onLogout);
   q('btnClientGeocode').addEventListener('click', onClientGeocode);
   q('btnSaveClientInfo').addEventListener('click', onSaveClientInfo);
+  q('btnClientConsentConfirm')?.addEventListener('click', onConfirmClientConsent);
+  q('btnClientConsentRevoke')?.addEventListener('click', onRevokeClientConsent);
   q('btnCreateSupplierRequest').addEventListener('click', onCreateSupplierRequest);
   q('btnSearchLinkSupplier').addEventListener('click', onSearchSupplierLinkCandidates);
   q('btnGoNewSupplier').addEventListener('click', () => {
     setClientTab('new-supplier');
   });
   q('btnSaveProfile').addEventListener('click', onSaveProfile);
+  q('btnSendSupplierConsentSingle').addEventListener('click', async () => {
+    try {
+      await onSendSupplierConsentSingle();
+    } catch (e) {
+      console.error('onSendSupplierConsentSingle error:', e);
+    }
+  });
+  q('btnSendAllSupplierConsents').addEventListener('click', onSendAllSupplierConsents);
   q('btnSaveChangeRequest').addEventListener('click', onSaveChangeRequest);
   q('searchSupplier').addEventListener('input', renderSupplierList);
   q('changeRequestField').addEventListener('change', renderChangeRequestInput);
@@ -1377,6 +1784,10 @@ function bindEvents() {
     q('clientHeaderLogo').innerHTML = `<img src="${blobUrl}" alt="aperçu logo client" />`;
   });
 
+  q('clientInfoGalleryFiles').addEventListener('change', () => {
+    renderSelectedGalleryPreview();
+  });
+
   ['clientInfoLat', 'clientInfoLng'].forEach((id) => {
     q(id).addEventListener('change', () => {
       initOrUpdateClientMap();
@@ -1387,15 +1798,53 @@ function bindEvents() {
     syncLongTextTextareaFromEditor();
   });
 
-  q('clientInfoLongEditorToolbar').addEventListener('click', (event) => {
+  q('clientInfoDescriptionLongEditor').addEventListener('paste', (event) => {
+    event.preventDefault();
+    const clipData = event.clipboardData || window.clipboardData;
+    const html = clipData && clipData.getData('text/html');
+    const text = clipData && clipData.getData('text/plain');
+    let cleanHtml;
+    if (html && html.trim()) {
+      cleanHtml = sanitizePastedHtml(html);
+    } else if (text) {
+      cleanHtml = text
+        .split(/\r?\n\r?\n+/)
+        .map((para) => para.trim())
+        .filter(Boolean)
+        .map((para) => '<p>' + escapeHtml(para).replace(/\r?\n/g, '<br>') + '</p>')
+        .join('');
+    } else {
+      return;
+    }
+    document.execCommand('insertHTML', false, cleanHtml);
+    syncLongTextTextareaFromEditor();
+    updateEditorToolbarState();
+  });
+
+  q('clientInfoLongEditorToolbar').addEventListener('mousedown', (event) => {
     const btn = event.target.closest('button[data-editor-cmd]');
     if (!btn) return;
+    // Prevent focus loss from editor before execCommand runs
+    event.preventDefault();
     const cmd = safe(btn.getAttribute('data-editor-cmd'));
-    const arg = btn.getAttribute('data-editor-arg');
-    q('clientInfoDescriptionLongEditor').focus();
-    document.execCommand(cmd, false, arg || null);
+    const arg = btn.getAttribute('data-editor-arg') || null;
+    const editor = q('clientInfoDescriptionLongEditor');
+    editor.focus();
+    if (cmd === 'createLink') {
+      const url = window.prompt('URL du lien (ex: https://exemple.fr)', 'https://');
+      if (url && url.trim() !== '' && url.trim() !== 'https://') {
+        document.execCommand('createLink', false, url.trim());
+      }
+    } else {
+      document.execCommand(cmd, false, arg);
+    }
     syncLongTextTextareaFromEditor();
+    updateEditorToolbarState();
   });
+
+  q('clientInfoDescriptionLongEditor').addEventListener('keyup', updateEditorToolbarState);
+  q('clientInfoDescriptionLongEditor').addEventListener('mouseup', updateEditorToolbarState);
+  q('clientInfoDescriptionLongEditor').addEventListener('selectionchange', updateEditorToolbarState);
 
   q('changeRequestStatusFilter').addEventListener('change', async () => {
     await loadChangeRequests();
@@ -1413,46 +1862,6 @@ function bindEvents() {
   q('linkSupplierSearch').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') onSearchSupplierLinkCandidates();
   });
-
-  // Bind consent and modal events
-  const consentListEl = q('supplierConsentList');
-  if (consentListEl) {
-    consentListEl.addEventListener('click', (event) => {
-      const sendBtn = event.target.closest('[data-send-supplier-consent]');
-      if (sendBtn) {
-        const supplierId = Number(sendBtn.getAttribute('data-send-supplier-consent') || 0);
-        if (supplierId > 0) {
-          onSendSupplierConsent(supplierId, false);
-        }
-        return;
-      }
-
-      const resendBtn = event.target.closest('[data-resend-supplier-consent]');
-      if (!resendBtn) return;
-      const supplierId = Number(resendBtn.getAttribute('data-resend-supplier-consent') || 0);
-      if (supplierId > 0) {
-        onSendSupplierConsent(supplierId, true);
-      }
-    });
-  }
-
-  // Bind modal controls for map modal
-  const closeMapBtn = q('closeMapModal');
-  const confirmMapBtn = q('confirmMapModal');
-  const mapModal = q('supplierMapModal');
-
-  if (closeMapBtn) {
-    closeMapBtn.addEventListener('click', hideSupplierMapModal);
-  }
-  if (confirmMapBtn) {
-    confirmMapBtn.addEventListener('click', hideSupplierMapModal);
-  }
-  if (mapModal) {
-    const overlay = mapModal.querySelector('.modal-overlay');
-    if (overlay) {
-      overlay.addEventListener('click', hideSupplierMapModal);
-    }
-  }
 }
 
 async function init() {

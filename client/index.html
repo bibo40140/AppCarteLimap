@@ -75,9 +75,9 @@
       <section class="card nav-card" style="margin-bottom:14px;">
         <div class="tabs tabs-alt" id="clientTabs">
           <button class="tab-btn active" data-tab="my-data" type="button">Ma fiche client</button>
+          <button class="tab-btn" data-tab="supplier-consents" type="button">Consentements fournisseurs</button>
+          <button class="tab-btn" data-tab="to-complete" type="button">A completer</button>
           <button class="tab-btn" data-tab="my-suppliers" type="button">Mes fournisseurs</button>
-          <button class="tab-btn" data-tab="consents" type="button">Consentements</button>
-          <button class="tab-btn" data-tab="incomplete-suppliers" type="button">À compléter</button>
           <button class="tab-btn" data-tab="new-supplier" type="button">Créer ou rattacher</button>
         </div>
       </section>
@@ -90,6 +90,20 @@
           </div>
           <p class="muted section-head-copy">Ces informations concernent votre structure et peuvent être utilisées dans les exports.</p>
         </div>
+        <section class="consent-box" aria-label="Consentement client">
+          <h4>Consentement de diffusion</h4>
+          <p class="muted">Validez la charte pour autoriser l'affichage de votre fiche adhérent sur les canaux publics.</p>
+          <label class="consent-check">
+            <input id="clientConsentCheckbox" type="checkbox" />
+            J'accepte le texte de consentement en vigueur
+          </label>
+          <div class="row row-actions">
+            <button id="btnClientConsentConfirm" class="primary" type="button">Valider mon consentement</button>
+            <button id="btnClientConsentRevoke" type="button">Révoquer</button>
+            <span id="clientConsentMsg" class="msg"></span>
+          </div>
+          <p id="clientConsentStatus" class="muted"></p>
+        </section>
         <form id="clientInfoForm" class="grid-2" onsubmit="return false;">
           <label>Nom client
             <input id="clientInfoName" />
@@ -116,6 +130,10 @@
             <input id="clientInfoLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
             <input id="clientInfoLogoPath" readonly placeholder="Aucun fichier sélectionné" />
           </label>
+          <label>Galerie d'images
+            <input id="clientInfoGalleryFiles" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" />
+            <div id="clientInfoGalleryPreview" class="gallery-preview"></div>
+          </label>
           <label>Adresse
             <input id="clientInfoAddress" />
           </label>
@@ -128,6 +146,27 @@
           <label>Pays
             <input id="clientInfoCountry" value="France" />
           </label>
+          <label>Lundi
+            <input id="clientInfoLundi" placeholder="Ex: 09:00-12:30 / 14:00-18:00" />
+          </label>
+          <label>Mardi
+            <input id="clientInfoMardi" placeholder="Ex: Fermé" />
+          </label>
+          <label>Mercredi
+            <input id="clientInfoMercredi" />
+          </label>
+          <label>Jeudi
+            <input id="clientInfoJeudi" />
+          </label>
+          <label>Vendredi
+            <input id="clientInfoVendredi" />
+          </label>
+          <label>Samedi
+            <input id="clientInfoSamedi" />
+          </label>
+          <label>Dimanche
+            <input id="clientInfoDimanche" />
+          </label>
           <label>Latitude
             <input id="clientInfoLat" />
           </label>
@@ -139,11 +178,14 @@
           </label>
           <label>Texte long
             <div class="editor-toolbar" id="clientInfoLongEditorToolbar">
-              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H2">Titre</button>
-              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="H3">Sous-titre</button>
-              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="P">Texte</button>
-              <button type="button" data-editor-cmd="bold">Gras</button>
-              <button type="button" data-editor-cmd="insertUnorderedList">Liste</button>
+              <button type="button" data-editor-cmd="bold" title="Gras"><b>G</b></button>
+              <button type="button" data-editor-cmd="italic" title="Italique"><i>I</i></button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="h2" title="Titre">H1</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="h3" title="Sous-titre">H2</button>
+              <button type="button" data-editor-cmd="formatBlock" data-editor-arg="p" title="Paragraphe normal">¶</button>
+              <button type="button" data-editor-cmd="insertUnorderedList" title="Liste à puces">&#8226; Liste</button>
+              <button type="button" data-editor-cmd="createLink" title="Insérer un lien">&#128279; Lien</button>
+              <button type="button" data-editor-cmd="unlink" title="Supprimer le lien">&#10006; Lien</button>
             </div>
             <div id="clientInfoDescriptionLongEditor" class="rich-editor" contenteditable="true"></div>
             <textarea id="clientInfoDescriptionLong" rows="5" class="hidden" placeholder="Présentation détaillée pour le site"></textarea>
@@ -155,6 +197,36 @@
           <button id="btnSaveClientInfo" class="primary" type="button">Mettre à jour ma fiche client</button>
           <span id="clientInfoMsg" class="msg"></span>
         </div>
+      </section>
+
+      <section class="card client-tab-panel" id="panel-supplier-consents" style="margin-bottom:14px;">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Zone 2</div>
+            <h3>Consentements fournisseurs</h3>
+          </div>
+          <p class="muted section-head-copy">Vue d'ensemble des demandes de consentement deja validées, en attente ou encore à envoyer.</p>
+        </div>
+        <div class="row row-actions">
+          <button id="btnSendAllSupplierConsents" class="primary" type="button">Envoyer tous les consentements</button>
+        </div>
+        <p id="supplierConsentOverviewSummary" class="muted"></p>
+        <div id="supplierConsentOverviewList" class="overview-list"></div>
+        <div class="row row-actions">
+          <span id="supplierConsentOverviewMsg" class="msg"></span>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel" id="panel-to-complete" style="margin-bottom:14px;">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Zone 2 bis</div>
+            <h3>Fournisseurs à compléter</h3>
+          </div>
+          <p class="muted section-head-copy">Repère les fiches qui manquent d'informations utiles pour être correctement affichées sur la carte et dans WordPress.</p>
+        </div>
+        <p id="supplierCompletenessSummary" class="muted"></p>
+        <div id="supplierCompletenessList" class="overview-list"></div>
       </section>
 
       <section class="card client-tab-panel" id="panel-new-supplier" style="margin-bottom:14px;">
@@ -249,71 +321,6 @@
         </div>
       </section>
 
-      <section class="card client-tab-panel" id="panel-consents" style="margin-bottom:14px;">
-        <div class="section-head consent-head">
-          <div>
-            <div class="section-kicker">Conformité</div>
-            <h3>Consentements</h3>
-          </div>
-          <p class="muted section-head-copy">Validation client par case a cocher + confirmation. Validation fournisseur via lien email.</p>
-        </div>
-
-        <div class="consent-stack">
-          <article class="consent-card">
-            <div class="consent-card-head">
-              <div>
-                <h4>Consentement de ma fiche client</h4>
-                <p class="muted">Votre fiche sera visible publiquement uniquement apres validation explicite.</p>
-              </div>
-              <span id="clientConsentStatus" class="consent-status">Statut: non soumis</span>
-            </div>
-
-            <div class="consent-note">
-              <strong>Texte de consentement</strong>
-              <p style="margin:8px 0 0;">J'accepte que les informations de ma structure soient affichees sur la carte publique LIMAP. Je peux retirer ce consentement ulterieurement.</p>
-            </div>
-
-            <div class="consent-actions">
-              <label style="display:flex; align-items:center; gap:8px;">
-                <input id="clientConsentCheckbox" type="checkbox" />
-                <span>J'ai lu et j'accepte le texte ci-dessus</span>
-              </label>
-            </div>
-            <div class="consent-actions" style="margin-top:8px;">
-              <button id="btnConfirmClientConsent" class="primary" type="button">Je confirme mon consentement</button>
-              <button id="btnRevokeClientConsent" type="button">Retirer mon consentement</button>
-              <span id="clientConsentMsg" class="msg"></span>
-            </div>
-          </article>
-
-          <article class="consent-card">
-            <div class="consent-card-head">
-              <div>
-                <h4>Envoi des demandes de consentement fournisseur</h4>
-                <p class="muted">Le fournisseur valide via un lien email. Aucun PDF.</p>
-              </div>
-            </div>
-            <div class="consent-actions">
-              <button id="btnSendAllSupplierConsents" class="primary" type="button">Envoyer a tous les fournisseurs non valides</button>
-              <span id="supplierConsentBulkMsg" class="msg"></span>
-            </div>
-          </article>
-
-          <article class="consent-card">
-            <div class="consent-card-head">
-              <div>
-                <h4>Suivi des fournisseurs</h4>
-                <p class="muted">Statuts possibles: none, sent, opened, approved, rejected, expired.</p>
-              </div>
-            </div>
-            <div id="supplierConsentList" class="consent-supplier-list"></div>
-            <div class="row row-actions" style="margin-top:8px;">
-              <span id="supplierConsentMsg" class="msg"></span>
-            </div>
-          </article>
-        </div>
-      </section>
-
       <div class="layout layout-clarified client-tab-panel" id="panel-my-suppliers">
         <aside class="card panel list-panel supplier-rail">
           <div class="row" style="justify-content:space-between;">
@@ -369,6 +376,14 @@
                 </div>
                 <p class="muted zone-copy">Ces informations sont communes à tous les clients liés à ce fournisseur.</p>
                 <div id="supplierGlobal" class="global-box hidden"></div>
+                <div id="supplierConsentBox" class="consent-box hidden" style="margin-top:10px;">
+                  <h4>Consentement fournisseur</h4>
+                  <p id="supplierConsentStatus" class="muted"></p>
+                  <div class="row row-actions">
+                    <button id="btnSendSupplierConsentSingle" type="button">Envoyer la demande à ce fournisseur</button>
+                    <span id="supplierConsentMsg" class="msg"></span>
+                  </div>
+                </div>
               </article>
 
               <article class="editor-zone editor-zone-client">
@@ -493,25 +508,6 @@
       </div>
     </section>
   </main>
-
-  <!-- Modal for supplier location map -->
-  <div id="supplierMapModal" class="modal hidden">
-    <div class="modal-overlay"></div>
-    <div class="modal-content supplier-map-modal">
-      <div class="modal-header">
-        <h2 id="mapModalTitle">Localisation du fournisseur</h2>
-        <button id="closeMapModal" type="button" class="close-btn" aria-label="Fermer">×</button>
-      </div>
-      <div class="modal-body">
-        <div id="supplierMapContainer" style="height:500px;border-radius:6px;overflow:hidden;margin-bottom:12px;"></div>
-        <div id="mapConsentInfo" class="consent-badge-info"></div>
-        <p id="mapAddressInfo" class="muted" style="margin-top:12px;"></p>
-      </div>
-      <div class="modal-footer">
-        <button id="confirmMapModal" type="button" class="primary">Fermer</button>
-      </div>
-    </div>
-  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

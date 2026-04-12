@@ -60,6 +60,10 @@ function confirm_client_consent(PDO $pdo): void
             'details' => ['consent_text_version' => $textVersion],
         ]);
 
+        if (function_exists('sync_client_to_wordpress')) {
+            sync_client_to_wordpress($pdo, $clientId);
+        }
+
         json_response(['ok' => true, 'message' => 'Consentement enregistré']);
     } catch (Exception $e) {
         json_response(['ok' => false, 'error' => 'Erreur lors de l\'enregistrement: ' . $e->getMessage()], 500);
@@ -99,6 +103,10 @@ function revoke_client_consent(PDO $pdo): void
             'target_id' => $clientId,
             'details' => ['reason' => $reason],
         ]);
+
+        if (function_exists('sync_client_to_wordpress')) {
+            sync_client_to_wordpress($pdo, $clientId);
+        }
 
         json_response(['ok' => true, 'message' => 'Consentement révoqué']);
     } catch (Exception $e) {
@@ -392,6 +400,10 @@ function approve_supplier_consent_from_token(PDO $pdo): void
             'details' => ['source_client_id' => $request['source_client_id']],
         ]);
 
+        if (function_exists('sync_supplier_to_wordpress')) {
+            sync_supplier_to_wordpress($pdo, (int)$request['supplier_id']);
+        }
+
         json_response(['ok' => true, 'message' => 'Merci pour votre accord !']);
     } catch (Exception $e) {
         json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
@@ -439,6 +451,10 @@ function reject_supplier_consent_from_token(PDO $pdo): void
             'target_id' => $request['supplier_id'],
             'details' => [],
         ]);
+
+        if (function_exists('sync_supplier_to_wordpress')) {
+            sync_supplier_to_wordpress($pdo, (int)$request['supplier_id']);
+        }
 
         json_response(['ok' => true, 'message' => 'Refus enregistré']);
     } catch (Exception $e) {
@@ -577,6 +593,10 @@ function revoke_client_consent_for_admin(PDO $pdo): void
             'details' => ['reason' => $reason],
         ]);
 
+        if (function_exists('sync_client_to_wordpress')) {
+            sync_client_to_wordpress($pdo, $clientId);
+        }
+
         json_response(['ok' => true, 'message' => 'Consentement client révoqué']);
     } catch (Exception $e) {
         json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
@@ -615,6 +635,10 @@ function revoke_supplier_consent_for_admin(PDO $pdo): void
             'target_id' => $supplierId,
             'details' => ['reason' => $reason],
         ]);
+
+        if (function_exists('sync_supplier_to_wordpress')) {
+            sync_supplier_to_wordpress($pdo, $supplierId);
+        }
 
         json_response(['ok' => true, 'message' => 'Consentement fournisseur révoqué']);
     } catch (Exception $e) {
@@ -680,7 +704,7 @@ function send_supplier_consent_email(PDO $pdo, string $email, string $clientName
 
     $subject = '[LIMAP] Demande de consentement fournisseur';
     $body = "Bonjour,\n\n"
-        . "Le client \"{$clientName}\" vous demande de confirmer votre consentement pour l'affichage public de votre fiche sur la carte LIMAP.\n\n"
+        . "L'adhérent  \"{$clientName}\" vous demande de confirmer votre consentement pour l'affichage public de votre fiche sur la carte et le site LIMAP.\n\n"
         . "Cliquez sur ce lien pour repondre :\n{$consentLink}\n\n"
         . "Ce lien est valable 14 jours.\n\n"
         . "Si vous n'etes pas concerne, ignorez simplement cet email.\n\n"

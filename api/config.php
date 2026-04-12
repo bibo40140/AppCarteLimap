@@ -33,14 +33,24 @@ $config = [
     ],
     'session_name' => 'map_admin_session',
     'notifications' => [
+        // Comma/semicolon-separated list of recipient emails.
         'admin_emails' => getenv('MAP_NOTIFY_EMAILS') ?: '',
+        // Optional From header. Leave empty to use PHP default mail sender.
         'from_email' => getenv('MAP_NOTIFY_FROM') ?: '',
         'from_name' => getenv('MAP_NOTIFY_FROM_NAME') ?: 'AppCarte Limap',
+        // SMTP config (optional). If host is set, notifications use SMTP directly.
         'smtp_host' => getenv('MAP_SMTP_HOST') ?: '',
         'smtp_port' => getenv('MAP_SMTP_PORT') ?: '',
+        // Supported values: '', 'tls', 'ssl'
         'smtp_encryption' => getenv('MAP_SMTP_ENCRYPTION') ?: 'tls',
         'smtp_username' => getenv('MAP_SMTP_USERNAME') ?: '',
         'smtp_password' => getenv('MAP_SMTP_PASSWORD') ?: '',
+    ],
+    'wordpress_sync' => [
+        'enabled' => (getenv('MAP_WP_SYNC_ENABLED') ?: '0') === '1',
+        'endpoint' => getenv('MAP_WP_SYNC_ENDPOINT') ?: '',
+        'secret' => getenv('MAP_WP_SYNC_SECRET') ?: '',
+        'timeout_seconds' => (int)(getenv('MAP_WP_SYNC_TIMEOUT') ?: 8),
     ],
 ];
 

@@ -8,7 +8,6 @@ let state = {
   change_requests: [],
   supplier_create_requests: [],
   supplier_link_requests: [],
-  consent_requests: [],
   activities: [],
   labels: [],
   supplier_types: [],
@@ -701,54 +700,6 @@ function renderSupplierLinkRequests() {
   host.innerHTML = `<table><thead><tr><th>Client</th><th>Fournisseur</th><th>Note client</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function renderConsentRequests() {
-  const host = q('consentRequestsTable');
-  const summaryEl = q('consentRequestSummary');
-  if (!host || !summaryEl) return;
-
-  const rowsData = state.consent_requests || [];
-  const pendingCount = rowsData.filter(r => String(r.status || '') === 'pending').length;
-  summaryEl.textContent = `${rowsData.length} document(s), dont ${pendingCount} en attente`;
-
-  if (!rowsData.length) {
-    host.innerHTML = '<div class="muted">Aucun document de consentement pour ce filtre.</div>';
-    return;
-  }
-
-  const typeLabel = (value) => {
-    const key = String(value || '');
-    if (key === 'client_charter') return 'Charte client';
-    if (key === 'supplier_responsibility') return 'Mode A - responsabilite fournisseurs';
-    if (key === 'supplier_individual') return 'Mode B - consentement fournisseur';
-    return key;
-  };
-
-  const rows = rowsData.map((r) => {
-    const status = String(r.status || 'pending');
-    const rowBadgeClass = status === 'approved' ? 'status-ok' : (status === 'rejected' ? 'status-conflict' : 'status-warn');
-    const reviewNote = escapeHtml(r.review_note || '');
-    const fileUrl = escapeHtml(r.file_url || '');
-    return `
-      <tr>
-        <td>${escapeHtml(typeLabel(r.request_type))}</td>
-        <td>${escapeHtml(r.client_name || '')}</td>
-        <td>${escapeHtml(r.supplier_name || '') || '—'}</td>
-        <td>${fileUrl ? `<a class="consent-link" href="${fileUrl}" target="_blank" rel="noopener">Ouvrir</a>` : '—'}</td>
-        <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
-        <td>${escapeHtml(r.created_at || '')}</td>
-        <td>${reviewNote || '—'}</td>
-        <td>
-          ${status === 'pending'
-            ? `<div class="row"><button type="button" onclick="reviewConsentRequest('${escapeHtml(r.request_scope || '')}', ${Number(r.id)}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewConsentRequest('${escapeHtml(r.request_scope || '')}', ${Number(r.id)}, 'rejected')">Refuser</button></div>`
-            : '<span class="muted">Traitee</span>'}
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  host.innerHTML = `<table><thead><tr><th>Type</th><th>Client</th><th>Fournisseur</th><th>Document</th><th>Statut</th><th>Date upload</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
 function updateRequestSelectionSummary() {
   const selectedCount = selectedChangeRequestIds.size;
   const selectedRows = (state.change_requests || []).filter(r => selectedChangeRequestIds.has(Number(r.id)));
@@ -827,22 +778,6 @@ async function loadChangeRequests() {
     state.supplier_link_requests = [];
   }
   renderSupplierLinkRequests();
-
-  try {
-    const consentData = await fetch(apiBase + encodeURIComponent('admin/consent-request/list') + createStatusParam + createClientParam, {
-      method: 'GET',
-      credentials: 'include',
-    }).then(async (resp) => {
-      const payload = await resp.json().catch(() => ({}));
-      if (!resp.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${resp.status}`);
-      return payload;
-    });
-    state.consent_requests = consentData.requests || [];
-  } catch (consentErr) {
-    console.error('Erreur chargement consentements:', consentErr);
-    state.consent_requests = [];
-  }
-  renderConsentRequests();
 }
 
 function csvEscape(value) {
@@ -2664,29 +2599,6 @@ window.reviewSupplierLinkRequest = async function reviewSupplierLinkRequest(id, 
   }
 };
 
-window.reviewConsentRequest = async function reviewConsentRequest(scope, id, decision) {
-  const request = state.consent_requests.find(x => Number(x.id) === Number(id) && String(x.request_scope || '') === String(scope || ''));
-  if (!request) return;
-
-  const actionLabel = decision === 'approved' ? 'approuver' : 'refuser';
-  if (!window.confirm(`Confirmer: ${actionLabel} le document #${id} ?`)) return;
-  const reviewNote = window.prompt('Note admin (optionnelle):', '') ?? '';
-
-  q('requestMsg').textContent = '';
-  try {
-    await api('admin/consent-request/review', 'POST', {
-      request_scope: scope,
-      id,
-      decision,
-      review_note: reviewNote,
-    });
-    q('requestMsg').textContent = `Document #${id} traite (${decision})`;
-    await loadBootstrap();
-  } catch (e) {
-    q('requestMsg').textContent = e.message;
-  }
-};
-
 window.reviewChangeRequestsBulk = async function reviewChangeRequestsBulk(decision) {
   const pendingIds = (state.change_requests || [])
     .filter(r => String(r.status || '') === 'pending')
@@ -3481,6 +3393,53 @@ function bindEvents() {
       q('visualMsg').textContent = 'Email de test envoyé';
     } catch (e) {
       q('visualMsg').textContent = e.message;
+    }
+  });
+
+  q('btnResyncWordpress').addEventListener('click', async () => {
+    const msg = q('visualMsg');
+    msg.textContent = 'Resync en cours…';
+    q('btnResyncWordpress').disabled = true;
+    try {
+      const callChunk = async (action, offset, limit) => {
+        const params = new URLSearchParams({ action, offset: String(offset), limit: String(limit) });
+        const resp = await fetch('../api/index.php?' + params.toString(), {
+          method: 'GET',
+          credentials: 'include',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) {
+          throw new Error(data.error || ('HTTP ' + resp.status));
+        }
+        return data;
+      };
+
+      const runChunkedResync = async (action, label) => {
+        const limit = 20;
+        let offset = 0;
+        let total = 0;
+        while (true) {
+          const res = await callChunk(action, offset, limit);
+          total = Number(res.total || 0);
+          const doneCount = Math.min(Number(res.next_offset || 0), total || Number(res.next_offset || 0));
+          msg.textContent = `${label}: ${doneCount}/${total || '?'}...`;
+          if (res.done) break;
+          offset = Number(res.next_offset || 0);
+        }
+      };
+
+      await runChunkedResync('admin/wordpress-sync/clients-resync', 'Adhérents');
+      await runChunkedResync('admin/wordpress-sync/suppliers-resync', 'Producteurs');
+      msg.textContent = 'Resync WordPress terminé (adhérents + producteurs) ✓';
+    } catch (e) {
+      const m = String(e && e.message ? e.message : 'Erreur inconnue');
+      if (m.toLowerCase().includes('non autorisé') || m.toLowerCase().includes('401')) {
+        msg.textContent = 'Erreur resync : session admin expirée, reconnectez-vous puis réessayez.';
+      } else {
+        msg.textContent = 'Erreur resync : ' + m;
+      }
+    } finally {
+      q('btnResyncWordpress').disabled = false;
     }
   });
 

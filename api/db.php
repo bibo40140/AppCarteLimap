@@ -52,6 +52,7 @@ function ensure_schema_upgrades(PDO $pdo): void
     if (!isset($columns['description_long'])) $alters[] = 'ADD COLUMN description_long TEXT NULL AFTER description_short';
     if (!isset($columns['is_public'])) $alters[] = 'ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 1 AFTER description_long';
     if (!isset($columns['public_updated_at'])) $alters[] = 'ADD COLUMN public_updated_at DATETIME NULL AFTER is_public';
+        if (!isset($columns['gallery_images'])) $alters[] = 'ADD COLUMN gallery_images LONGTEXT NULL AFTER description_long';
 
     if ($alters) {
         $pdo->exec('ALTER TABLE clients ' . implode(', ', $alters));
