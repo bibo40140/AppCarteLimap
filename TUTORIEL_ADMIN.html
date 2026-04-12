@@ -248,9 +248,41 @@
       <div class="tip">
         Si vous etes deja connecte sur une autre session (client par exemple), commencez par vous deconnecter de cette session avant d'acceder a l'admin.
       </div>
+      <div class="tip-green">
+        Nouveau : depuis la carte publique (https://limap.fr/Carte/), un client peut se connecter via le menu gauche puis ouvrir son espace avec le bouton &laquo;&nbsp;Acceder a mon espace client&nbsp;&raquo;.
+      </div>
     </section>
 
-    <!-- ===== 2. ONGLETS ===== -->
+    <section class="card">
+      <h2>1 bis. Carte publique vs mode prive client</h2>
+      <table>
+        <thead>
+          <tr><th>Mode</th><th>Qui y accede</th><th>Donnees visibles</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Public</strong></td>
+            <td>Visiteur non connecte</td>
+            <td>Uniquement les clients/fournisseurs conformes aux regles de consentement.</td>
+          </tr>
+          <tr>
+            <td><strong>Prive client</strong></td>
+            <td>Client connecte depuis la carte</td>
+            <td>Tous les clients/fournisseurs (y compris non valides consentement) pour travail interne.</td>
+          </tr>
+          <tr>
+            <td><strong>Admin</strong></td>
+            <td>Compte admin</td>
+            <td>Redirection vers l'espace admin complet.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="warn">
+        Important : la vue publique reste filtree par consentement. Le mode prive est reserve aux utilisateurs authentifies.
+      </div>
+    </section>
+
+    <!-- ===== 3. ONGLETS ===== -->
     <section class="card">
       <h2>2. Vue d'ensemble des onglets</h2>
       <div class="grid">

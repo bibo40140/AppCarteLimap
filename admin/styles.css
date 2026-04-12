@@ -52,6 +52,7 @@ th, td { border-bottom: 1px solid #eceff4; text-align: left; padding: 8px; verti
 .status-ok { background: #ecfdf5; border-color: #10b981; color: #065f46; }
 .status-warn { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
 .status-conflict { background: #fef2f2; border-color: #ef4444; color: #991b1b; }
+.consent-link { white-space: nowrap; }
 .row-hidden { display: none; }
 .btn-map-edit { white-space: nowrap; padding: 6px 10px; }
 .import-loader { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #dbeafe; background: #eff6ff; border-radius: 8px; }

@@ -194,5 +194,79 @@ function ensure_schema_upgrades(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
 
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS client_consents (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            client_id INT NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT "approved",
+            consent_text_version VARCHAR(40) NOT NULL,
+            consent_text_snapshot LONGTEXT NOT NULL,
+            consent_text_hash VARCHAR(64) NOT NULL,
+            accepted_by_user_id INT NULL,
+            accepted_by_name VARCHAR(120) NULL,
+            accepted_at DATETIME NOT NULL,
+            accepted_ip VARCHAR(64) NULL,
+            accepted_user_agent VARCHAR(255) NULL,
+            revoked_at DATETIME NULL,
+            revoked_by_type VARCHAR(20) NULL,
+            revoked_by_id INT NULL,
+            revoke_reason TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_client_consents_client (client_id),
+            INDEX idx_client_consents_status (status),
+            INDEX idx_client_consents_accepted_at (accepted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS supplier_consent_requests (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            supplier_id INT NOT NULL,
+            source_client_id INT NOT NULL,
+            recipient_email VARCHAR(190) NOT NULL,
+            request_token_hash VARCHAR(255) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT "sent",
+            consent_text_version VARCHAR(40) NOT NULL,
+            consent_text_snapshot LONGTEXT NOT NULL,
+            consent_text_hash VARCHAR(64) NOT NULL,
+            requested_at DATETIME NOT NULL,
+            opened_at DATETIME NULL,
+            answered_at DATETIME NULL,
+            answer_ip VARCHAR(64) NULL,
+            answer_user_agent VARCHAR(255) NULL,
+            expires_at DATETIME NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_supplier_consent_requests_supplier (supplier_id),
+            INDEX idx_supplier_consent_requests_source (source_client_id),
+            INDEX idx_supplier_consent_requests_status (status),
+            INDEX idx_supplier_consent_requests_requested (requested_at),
+            INDEX idx_supplier_consent_requests_expires (expires_at),
+            UNIQUE INDEX idx_supplier_consent_requests_token (request_token_hash)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS supplier_consents (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            supplier_id INT NOT NULL,
+            approved_from_request_id BIGINT NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT "approved",
+            consent_text_version VARCHAR(40) NOT NULL,
+            consent_text_snapshot LONGTEXT NOT NULL,
+            consent_text_hash VARCHAR(64) NOT NULL,
+            approved_at DATETIME NOT NULL,
+            approved_ip VARCHAR(64) NULL,
+            approved_user_agent VARCHAR(255) NULL,
+            revoked_at DATETIME NULL,
+            revoked_by_type VARCHAR(20) NULL,
+            revoked_by_id INT NULL,
+            revoke_reason TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_supplier_consents_supplier (supplier_id),
+            INDEX idx_supplier_consents_status (status),
+            INDEX idx_supplier_consents_approved_at (approved_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
     $done = true;
 }

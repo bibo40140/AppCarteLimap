@@ -76,6 +76,8 @@
         <div class="tabs tabs-alt" id="clientTabs">
           <button class="tab-btn active" data-tab="my-data" type="button">Ma fiche client</button>
           <button class="tab-btn" data-tab="my-suppliers" type="button">Mes fournisseurs</button>
+          <button class="tab-btn" data-tab="consents" type="button">Consentements</button>
+          <button class="tab-btn" data-tab="incomplete-suppliers" type="button">À compléter</button>
           <button class="tab-btn" data-tab="new-supplier" type="button">Créer ou rattacher</button>
         </div>
       </section>
@@ -244,6 +246,71 @@
               <div id="supplierLinkRequestsList" class="list"></div>
             </div>
           </section>
+        </div>
+      </section>
+
+      <section class="card client-tab-panel" id="panel-consents" style="margin-bottom:14px;">
+        <div class="section-head consent-head">
+          <div>
+            <div class="section-kicker">Conformité</div>
+            <h3>Consentements</h3>
+          </div>
+          <p class="muted section-head-copy">Validation client par case a cocher + confirmation. Validation fournisseur via lien email.</p>
+        </div>
+
+        <div class="consent-stack">
+          <article class="consent-card">
+            <div class="consent-card-head">
+              <div>
+                <h4>Consentement de ma fiche client</h4>
+                <p class="muted">Votre fiche sera visible publiquement uniquement apres validation explicite.</p>
+              </div>
+              <span id="clientConsentStatus" class="consent-status">Statut: non soumis</span>
+            </div>
+
+            <div class="consent-note">
+              <strong>Texte de consentement</strong>
+              <p style="margin:8px 0 0;">J'accepte que les informations de ma structure soient affichees sur la carte publique LIMAP. Je peux retirer ce consentement ulterieurement.</p>
+            </div>
+
+            <div class="consent-actions">
+              <label style="display:flex; align-items:center; gap:8px;">
+                <input id="clientConsentCheckbox" type="checkbox" />
+                <span>J'ai lu et j'accepte le texte ci-dessus</span>
+              </label>
+            </div>
+            <div class="consent-actions" style="margin-top:8px;">
+              <button id="btnConfirmClientConsent" class="primary" type="button">Je confirme mon consentement</button>
+              <button id="btnRevokeClientConsent" type="button">Retirer mon consentement</button>
+              <span id="clientConsentMsg" class="msg"></span>
+            </div>
+          </article>
+
+          <article class="consent-card">
+            <div class="consent-card-head">
+              <div>
+                <h4>Envoi des demandes de consentement fournisseur</h4>
+                <p class="muted">Le fournisseur valide via un lien email. Aucun PDF.</p>
+              </div>
+            </div>
+            <div class="consent-actions">
+              <button id="btnSendAllSupplierConsents" class="primary" type="button">Envoyer a tous les fournisseurs non valides</button>
+              <span id="supplierConsentBulkMsg" class="msg"></span>
+            </div>
+          </article>
+
+          <article class="consent-card">
+            <div class="consent-card-head">
+              <div>
+                <h4>Suivi des fournisseurs</h4>
+                <p class="muted">Statuts possibles: none, sent, opened, approved, rejected, expired.</p>
+              </div>
+            </div>
+            <div id="supplierConsentList" class="consent-supplier-list"></div>
+            <div class="row row-actions" style="margin-top:8px;">
+              <span id="supplierConsentMsg" class="msg"></span>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -426,6 +493,25 @@
       </div>
     </section>
   </main>
+
+  <!-- Modal for supplier location map -->
+  <div id="supplierMapModal" class="modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content supplier-map-modal">
+      <div class="modal-header">
+        <h2 id="mapModalTitle">Localisation du fournisseur</h2>
+        <button id="closeMapModal" type="button" class="close-btn" aria-label="Fermer">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="supplierMapContainer" style="height:500px;border-radius:6px;overflow:hidden;margin-bottom:12px;"></div>
+        <div id="mapConsentInfo" class="consent-badge-info"></div>
+        <p id="mapAddressInfo" class="muted" style="margin-top:12px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="confirmMapModal" type="button" class="primary">Fermer</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

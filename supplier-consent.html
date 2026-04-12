@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Consentement fournisseur - LIMAP</title>
+  <style>
+    :root {
+      --bg: #f3efe7;
+      --card: #fffdf8;
+      --line: #dfd5c4;
+      --ink: #2b2318;
+      --muted: #6f6658;
+      --ok: #236744;
+      --ok-bg: #e5f3ea;
+      --danger: #9f2f2f;
+      --danger-bg: #fae7e7;
+      --primary: #2e5f87;
+      --primary-dark: #214a6a;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 20% -10%, #f8edd6 0%, transparent 60%),
+        radial-gradient(900px 450px at 110% 110%, #e4f1fb 0%, transparent 65%),
+        var(--bg);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    .card {
+      width: min(760px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 20px 40px rgba(43, 35, 24, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.5rem;
+    }
+
+    .muted { color: var(--muted); }
+    .hidden { display: none !important; }
+
+    .meta {
+      margin: 14px 0;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fbf8f2;
+      display: grid;
+      gap: 6px;
+    }
+
+    .consent-text {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 14px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      max-height: 340px;
+      overflow: auto;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    button.primary:hover { background: var(--primary-dark); }
+
+    button.secondary {
+      background: #f4efe5;
+      border-color: var(--line);
+      color: var(--ink);
+    }
+
+    .banner {
+      margin-top: 14px;
+      border-radius: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      background: #f8f3e7;
+      color: var(--ink);
+    }
+
+    .banner.ok {
+      background: var(--ok-bg);
+      border-color: #a8d1b7;
+      color: var(--ok);
+    }
+
+    .banner.error {
+      background: var(--danger-bg);
+      border-color: #e2a8a8;
+      color: var(--danger);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Validation du consentement fournisseur</h1>
+    <p class="muted">Cette page vous permet de confirmer ou refuser l'affichage public de votre fiche fournisseur sur la carte LIMAP.</p>
+
+    <div id="loading" class="banner">Chargement de la demande...</div>
+
+    <section id="content" class="hidden">
+      <div class="meta">
+        <div><strong>Client demandeur:</strong> <span id="clientName"></span></div>
+        <div><strong>Fournisseur:</strong> <span id="supplierName"></span></div>
+        <div><strong>Email:</strong> <span id="supplierEmail"></span></div>
+        <div><strong>Expiration du lien:</strong> <span id="expiresAt"></span></div>
+      </div>
+
+      <div id="consentText" class="consent-text"></div>
+
+      <div class="actions">
+        <button id="btnApprove" class="primary" type="button">J'accepte</button>
+        <button id="btnReject" class="secondary" type="button">Je refuse</button>
+      </div>
+    </section>
+
+    <div id="message" class="banner hidden"></div>
+  </main>
+
+  <script>
+    (function () {
+      const token = new URLSearchParams(window.location.search).get('token') || '';
+      const loadingEl = document.getElementById('loading');
+      const contentEl = document.getElementById('content');
+      const messageEl = document.getElementById('message');
+      const approveBtn = document.getElementById('btnApprove');
+      const rejectBtn = document.getElementById('btnReject');
+
+      const basePath = window.location.pathname
+        .replace(/\/supplier-consent\.html$/i, '')
+        .replace(/\/$/, '');
+      const apiBase = window.location.origin + basePath + '/api/index.php?action=';
+
+      function setMessage(text, kind) {
+        messageEl.textContent = text;
+        messageEl.classList.remove('hidden', 'ok', 'error');
+        if (kind === 'ok') messageEl.classList.add('ok');
+        if (kind === 'error') messageEl.classList.add('error');
+      }
+
+      function setBusy(busy) {
+        approveBtn.disabled = busy;
+        rejectBtn.disabled = busy;
+      }
+
+      async function api(action, method, body) {
+        const res = await fetch(apiBase + encodeURIComponent(action), {
+          method: method,
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || payload.ok === false) {
+          throw new Error(payload.error || ('HTTP ' + res.status));
+        }
+        return payload;
+      }
+
+      async function loadRequest() {
+        if (!token) {
+          loadingEl.classList.add('hidden');
+          setMessage('Lien invalide: token manquant.', 'error');
+          return;
+        }
+
+        try {
+          const res = await fetch(
+            apiBase + encodeURIComponent('supplier/consent/view') + '&token=' + encodeURIComponent(token),
+            {
+              method: 'GET',
+              credentials: 'omit',
+            }
+          );
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload.ok === false) {
+            throw new Error(payload.error || ('HTTP ' + res.status));
+          }
+          const req = payload.request || {};
+          document.getElementById('clientName').textContent = req.client_name || '';
+          document.getElementById('supplierName').textContent = req.supplier_name || '';
+          document.getElementById('supplierEmail').textContent = req.supplier_email || '';
+          document.getElementById('expiresAt').textContent = req.expires_at || '';
+          document.getElementById('consentText').textContent = req.consent_text || '';
+
+          loadingEl.classList.add('hidden');
+          contentEl.classList.remove('hidden');
+        } catch (err) {
+          loadingEl.classList.add('hidden');
+          setMessage(err.message || 'Erreur de chargement du lien.', 'error');
+        }
+      }
+
+      async function submitDecision(action, successText) {
+        setMessage('', null);
+        setBusy(true);
+        try {
+          const payload = await api(action, 'POST', { token: token });
+          contentEl.classList.add('hidden');
+          setMessage(payload.message || successText, 'ok');
+        } catch (err) {
+          setMessage(err.message || 'Erreur lors de l\'enregistrement.', 'error');
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      approveBtn.addEventListener('click', function () {
+        submitDecision('supplier/consent/approve', 'Merci, votre accord est enregistre.');
+      });
+
+      rejectBtn.addEventListener('click', function () {
+        submitDecision('supplier/consent/reject', 'Votre refus a bien ete enregistre.');
+      });
+
+      loadRequest();
+    })();
+  </script>
+</body>
+</html>

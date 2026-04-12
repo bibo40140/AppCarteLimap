@@ -17,6 +17,8 @@ const state = {
 const mapState = {
   map: null,
   marker: null,
+  supplierMap: null,
+  supplierMarker: null,
 };
 
 const q = (id) => document.getElementById(id);
@@ -588,15 +590,29 @@ function formatGlobalSupplier(s) {
   const contact = [safe(s.phone), safe(s.email)].filter(Boolean).join(' / ') || '-';
   const logo = safe(s.logo_url);
   const shortDescription = safe(s.description_short) || '-';
+  const lat = Number(s.latitude);
+  const lng = Number(s.longitude);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+  const consentBadge = getSupplierConsentBadgeHtml(s);
+  const mapButtonHtml = hasCoords
+    ? `<button type="button" class="view-map-btn" onclick="showSupplierMapModal(${Number(s.id)})">📍 Voir sur la carte</button>`
+    : '<span style="font-size:12px;color:#999;">📍 Position non disponible</span>';
 
   return [
     '<strong>Fiche globale</strong>',
+    '<div style="margin:8px 0;display:flex;gap:8px;align-items:center;">',
+    consentBadge,
+    '</div>',
     (logo ? '<div style="margin:6px 0;"><img src="' + logo + '" alt="logo producteur" style="max-height:46px;max-width:160px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px;padding:2px;background:#fff;"></div>' : ''),
     '<div><b>Type:</b> ' + type + '</div>',
     '<div><b>Activites:</b> ' + acts + '</div>',
     '<div><b>Labels:</b> ' + labels + '</div>',
     '<div><b>Description courte:</b> ' + shortDescription + '</div>',
     '<div><b>Contact:</b> ' + contact + '</div>',
+    '<div style="margin-top:12px;">',
+    mapButtonHtml,
+    '</div>',
   ].join('');
 }
 
@@ -622,10 +638,29 @@ function renderSupplierList() {
       const rel = safe(s.relationship_status) || 'active';
       const relLabel = relationshipStatusLabel(rel);
       const city = safe(s.city) || '-';
+      const consentStatus = safe(s.supplier_consent_status || 'none');
+      let consentBadgeClass = '';
+      let consentBadgeLabel = '';
+
+      if (consentStatus === 'approved') {
+        consentBadgeClass = 'supplier-list-item-badge approved';
+        consentBadgeLabel = '✓ Signé';
+      } else if (consentStatus === 'sent' || consentStatus === 'opened') {
+        consentBadgeClass = 'supplier-list-item-badge pending';
+        consentBadgeLabel = '⧐ En attente';
+      } else if (consentStatus === 'rejected' || consentStatus === 'expired') {
+        consentBadgeClass = 'supplier-list-item-badge pending';
+        consentBadgeLabel = '✕ Refusé';
+      } else {
+        consentBadgeClass = 'supplier-list-item-badge';
+        consentBadgeLabel = '⊘ Non demandé';
+      }
+
       return [
         '<div class="list-item ' + (isActive ? 'active' : '') + '" data-id="' + Number(s.id) + '">',
         '<div class="list-main">' + (safe(s.name) || '(sans nom)') + '</div>',
         '<div class="list-sub">' + city + ' - statut: ' + relLabel + '</div>',
+        '<div class="' + consentBadgeClass + '">' + consentBadgeLabel + '</div>',
         '</div>',
       ].join('');
     })
@@ -795,6 +830,7 @@ async function loadBootstrap() {
   renderClientHeader();
   renderClientInfoForm();
   renderSupplierList();
+  renderIncompleteSuppliers();
   renderEditor();
 
   try {
@@ -1140,6 +1176,171 @@ async function onSaveChangeRequest() {
   }
 }
 
+function getSupplierConsentBadgeHtml(supplier) {
+  const status = safe(supplier.supplier_consent_status || 'none');
+  let badgeClass = 'consent-badge none';
+  let badgeLabel = 'Non signé';
+
+  if (status === 'approved') {
+    badgeClass = 'consent-badge approved';
+    badgeLabel = '✓ Signé';
+  } else if (status === 'sent' || status === 'opened') {
+    badgeClass = 'consent-badge pending';
+    badgeLabel = '⧐ En attente';
+  } else if (status === 'rejected' || status === 'expired') {
+    badgeClass = 'consent-badge pending';
+    badgeLabel = '✕ Refusé';
+  }
+
+  return `<span class="${badgeClass}">${badgeLabel}</span>`;
+}
+
+function showSupplierMapModal(supplierId) {
+  const supplier = state.suppliers.find((s) => Number(s.id) === Number(supplierId));
+  if (!supplier) return;
+
+  const lat = Number(supplier.latitude);
+  const lng = Number(supplier.longitude);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+  const modal = q('supplierMapModal');
+  const mapContainer = q('supplierMapContainer');
+  const consentInfo = q('mapConsentInfo');
+  const addressInfo = q('mapAddressInfo');
+
+  q('mapModalTitle').textContent = `Localisation - ${escapeHtml(safe(supplier.name))}`;
+
+  // Ensure map container is visible
+  mapContainer.style.display = 'block';
+
+  // Get consent badge
+  const consentStatus = safe(supplier.supplier_consent_status || 'none');
+  let consentHtml = '';
+  if (consentStatus === 'approved') {
+    consentHtml = '<strong style="color:#155724;">✓ Consentement signé</strong><p>Ce fournisseur a signé le consentement RGPD.</p>';
+  } else if (consentStatus === 'sent' || consentStatus === 'opened') {
+    consentHtml = '<strong style="color:#856404;">⧐ Consentement en attente</strong><p>Une demande de consentement RGPD a été envoyée au fournisseur.</p>';
+  } else if (consentStatus === 'rejected' || consentStatus === 'expired') {
+    consentHtml = '<strong style="color:#a94442;">✕ Consentement refusé ou expiré</strong><p>Le fournisseur a refusé ou le délai a expiré.</p>';
+  } else {
+    consentHtml = '<strong style="color:#383d41;">⊘ Aucun consentement demandé</strong><p>Aucune demande de consentement RGPD n\'a encore été envoyée.</p>';
+  }
+  consentInfo.innerHTML = consentHtml;
+
+  // Build address display
+  const addressParts = [
+    safe(supplier.address),
+    safe(supplier.postal_code),
+    safe(supplier.city),
+    safe(supplier.country),
+  ].filter(Boolean);
+  addressInfo.textContent = addressParts.length ? `Adresse: ${addressParts.join(', ')}` : 'Adresse incomplète';
+
+  // Show modal
+  modal.classList.remove('hidden');
+
+  // Initialize or update Leaflet map
+  if (!mapState.supplierMap) {
+    mapState.supplierMap = L.map('supplierMapContainer');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(mapState.supplierMap);
+  }
+
+  // Clear previous markers
+  if (mapState.supplierMarker) {
+    mapState.supplierMarker.remove();
+  }
+
+  // Set center and add marker
+  const center = hasCoords ? [lat, lng] : [43.7102, -1.0553];
+  const zoom = hasCoords ? 15 : 8;
+
+  mapState.supplierMap.setView(center, zoom);
+  mapState.supplierMap.invalidateSize(false);
+
+  if (hasCoords) {
+    mapState.supplierMarker = L.marker([lat, lng])
+      .bindPopup(`<strong>${escapeHtml(safe(supplier.name))}</strong><br>${escapeHtml(addressParts.join(', '))}`)
+      .addTo(mapState.supplierMap)
+      .openPopup();
+  }
+}
+
+function hideSupplierMapModal() {
+  const modal = q('supplierMapModal');
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+}
+
+function ensureIncompleteSuppliersPanelExists() {
+  if (document.getElementById('panel-incomplete-suppliers')) {
+    return;
+  }
+
+  const suppliersPanel = document.getElementById('panel-my-suppliers');
+  if (!suppliersPanel || !suppliersPanel.parentNode) {
+    return;
+  }
+
+  const panel = document.createElement('section');
+  panel.className = 'card client-tab-panel';
+  panel.id = 'panel-incomplete-suppliers';
+  panel.style.marginBottom = '14px';
+  panel.innerHTML = [
+    '<div class="section-head">',
+    '<div>',
+    '<div class="section-kicker">Resume</div>',
+    '<h3>Fournisseurs a completer</h3>',
+    '</div>',
+    '<p class="muted section-head-copy">Synthese des informations essentielles manquantes pour l affichage carte.</p>',
+    '</div>',
+    '<div id="incompleteSuppliersList" class="list"></div>',
+  ].join('');
+
+  suppliersPanel.parentNode.insertBefore(panel, suppliersPanel);
+}
+
+function getSupplierMissingFields(supplier) {
+  const missing = [];
+  if (!safe(supplier.address)) missing.push('adresse');
+  if (!safe(supplier.postal_code)) missing.push('code postal');
+  if (!safe(supplier.city)) missing.push('ville');
+  if (!safe(supplier.country)) missing.push('pays');
+
+  const lat = Number(supplier.latitude);
+  const lng = Number(supplier.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) missing.push('coordonnees');
+
+  return missing;
+}
+
+function renderIncompleteSuppliers() {
+  ensureIncompleteSuppliersPanelExists();
+  const host = q('incompleteSuppliersList');
+  if (!host) return;
+
+  const incompleteRows = (state.suppliers || [])
+    .map((supplier) => ({ supplier, missing: getSupplierMissingFields(supplier) }))
+    .filter((item) => item.missing.length > 0);
+
+  if (!incompleteRows.length) {
+    host.innerHTML = '<div class="list-item"><div class="list-sub">Aucun fournisseur incomplet.</div></div>';
+    return;
+  }
+
+  host.innerHTML = incompleteRows.map((item) => {
+    const supplier = item.supplier;
+    return [
+      '<div class="list-item">',
+      '<div class="list-main">' + escapeHtml(safe(supplier.name) || '(sans nom)') + '</div>',
+      '<div class="list-sub"><b>Manque:</b> ' + escapeHtml(item.missing.join(', ')) + '</div>',
+      '</div>',
+    ].join('');
+  }).join('');
+}
+
 function bindEvents() {
   bindClientTabs();
   q('btnLogin').addEventListener('click', onLogin);
@@ -1212,6 +1413,46 @@ function bindEvents() {
   q('linkSupplierSearch').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') onSearchSupplierLinkCandidates();
   });
+
+  // Bind consent and modal events
+  const consentListEl = q('supplierConsentList');
+  if (consentListEl) {
+    consentListEl.addEventListener('click', (event) => {
+      const sendBtn = event.target.closest('[data-send-supplier-consent]');
+      if (sendBtn) {
+        const supplierId = Number(sendBtn.getAttribute('data-send-supplier-consent') || 0);
+        if (supplierId > 0) {
+          onSendSupplierConsent(supplierId, false);
+        }
+        return;
+      }
+
+      const resendBtn = event.target.closest('[data-resend-supplier-consent]');
+      if (!resendBtn) return;
+      const supplierId = Number(resendBtn.getAttribute('data-resend-supplier-consent') || 0);
+      if (supplierId > 0) {
+        onSendSupplierConsent(supplierId, true);
+      }
+    });
+  }
+
+  // Bind modal controls for map modal
+  const closeMapBtn = q('closeMapModal');
+  const confirmMapBtn = q('confirmMapModal');
+  const mapModal = q('supplierMapModal');
+
+  if (closeMapBtn) {
+    closeMapBtn.addEventListener('click', hideSupplierMapModal);
+  }
+  if (confirmMapBtn) {
+    confirmMapBtn.addEventListener('click', hideSupplierMapModal);
+  }
+  if (mapModal) {
+    const overlay = mapModal.querySelector('.modal-overlay');
+    if (overlay) {
+      overlay.addEventListener('click', hideSupplierMapModal);
+    }
+  }
 }
 
 async function init() {

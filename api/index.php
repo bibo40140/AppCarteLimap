@@ -2,6 +2,7 @@
 
 require __DIR__ . '/db.php';
 require __DIR__ . '/helpers.php';
+require __DIR__ . '/consent.php';
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -373,6 +374,44 @@ try {
             list_supplier_link_requests_for_client($pdo);
             break;
 
+        // ==================== Phase 3: Consent Routes ====================
+        case 'client/consent/confirm':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            confirm_client_consent($pdo);
+            break;
+
+        case 'client/consent/revoke':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            revoke_client_consent($pdo);
+            break;
+
+        case 'client/supplier-consent/send':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            send_supplier_consent_request($pdo);
+            break;
+
+        case 'client/supplier-consent/send-bulk':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            send_supplier_consent_requests_bulk($pdo);
+            break;
+
+        case 'client/supplier-consent/history':
+            require_client_or_admin();
+            get_supplier_consent_history($pdo);
+            break;
+
         case 'client/change-request/save':
             require_client_or_admin();
             if ($method !== 'POST') {
@@ -436,6 +475,64 @@ try {
         case 'map-data':
             map_data($pdo);
             break;
+
+        // ==================== Phase 3: Public Supplier Routes ====================
+        case 'supplier/consent/view':
+            // GET request viewing consent from token (public, no auth)
+            if ($method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            view_supplier_consent_from_token($pdo);
+            break;
+
+        case 'supplier/consent/approve':
+            // POST approval via token (public, no auth)
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            approve_supplier_consent_from_token($pdo);
+            break;
+
+        case 'supplier/consent/reject':
+            // POST rejection via token (public, no auth)
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            reject_supplier_consent_from_token($pdo);
+            break;
+
+        // ==================== Phase 3: Admin Routes ====================
+        case 'admin/consent-overview':
+            require_admin();
+            get_consent_overview_for_admin($pdo);
+            break;
+
+        case 'admin/supplier-consent/resend':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            resend_supplier_consent_for_admin($pdo);
+            break;
+
+        case 'admin/client-consent/revoke':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            revoke_client_consent_for_admin($pdo);
+            break;
+
+        case 'admin/supplier-consent/revoke':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            revoke_supplier_consent_for_admin($pdo);
+            break;
+
+        // ==================== Original Routes ====================
+        case 'map-data':
 
         default:
             json_response(['ok' => false, 'error' => 'Action inconnue'], 404);
@@ -1811,6 +1908,149 @@ function upload_activity_icon(): void
     json_response(['ok' => true, 'url' => $url]);
 }
 
+function store_uploaded_pdf(string $fieldName, string $subDir, string $prefix): array
+{
+    if (empty($_FILES[$fieldName]) || !is_array($_FILES[$fieldName])) {
+        json_response(['ok' => false, 'error' => 'Fichier PDF manquant'], 422);
+    }
+
+    $file = $_FILES[$fieldName];
+    if (!empty($file['error'])) {
+        json_response(['ok' => false, 'error' => 'Erreur upload (' . (int)$file['error'] . ')'], 422);
+    }
+
+    $tmpPath = $file['tmp_name'] ?? '';
+    if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+        json_response(['ok' => false, 'error' => 'Upload invalide'], 422);
+    }
+
+    $maxSize = 10 * 1024 * 1024;
+    if (($file['size'] ?? 0) > $maxSize) {
+        json_response(['ok' => false, 'error' => 'PDF trop volumineux (max 10MB)'], 422);
+    }
+
+    $mime = mime_content_type($tmpPath) ?: '';
+    $originalName = (string)($file['name'] ?? '');
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($mime !== 'application/pdf' && $ext !== 'pdf') {
+        json_response(['ok' => false, 'error' => 'Seuls les fichiers PDF sont acceptés'], 422);
+    }
+
+    $rootDir = dirname(__DIR__);
+    $targetDir = $rootDir . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $subDir;
+    if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+        json_response(['ok' => false, 'error' => 'Impossible de créer le dossier upload'], 500);
+    }
+
+    $filename = $prefix . '_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.pdf';
+    $destPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+    if (!move_uploaded_file($tmpPath, $destPath)) {
+        json_response(['ok' => false, 'error' => 'Impossible de déplacer le fichier uploadé'], 500);
+    }
+
+    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api')), '/');
+    $baseWebPath = preg_replace('#/api$#', '', $scriptDir);
+    $filePath = ($baseWebPath ?: '') . '/uploads/' . $subDir . '/' . $filename;
+
+    return [
+        'file_path' => $filePath,
+        'original_filename' => $originalName,
+        'file_hash' => hash_file('sha256', $destPath),
+    ];
+}
+
+function upload_client_consent_charter(PDO $pdo): void
+{
+    assert_client_can_write_profile();
+    $clientId = resolve_effective_client_id();
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $stored = store_uploaded_pdf('pdf', 'charteclient', 'client_charter_c' . $clientId);
+    $uploadedByUserId = !empty($_SESSION['client_user_id']) ? (int)$_SESSION['client_user_id'] : null;
+
+    $pdo->prepare('INSERT INTO client_consent_documents (client_id, consent_type, file_path, original_filename, file_hash, status, uploaded_by_user_id) VALUES (:client_id, :consent_type, :file_path, :original_filename, :file_hash, "pending", :uploaded_by_user_id)')
+        ->execute([
+            ':client_id' => $clientId,
+            ':consent_type' => 'client_charter',
+            ':file_path' => $stored['file_path'],
+            ':original_filename' => $stored['original_filename'],
+            ':file_hash' => $stored['file_hash'],
+            ':uploaded_by_user_id' => $uploadedByUserId,
+        ]);
+
+    write_admin_audit($pdo, 'client_consent_uploaded', [
+        'target_type' => 'client',
+        'target_id' => $clientId,
+        'details' => ['consent_type' => 'client_charter'],
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function upload_client_supplier_responsibility_consent(PDO $pdo): void
+{
+    assert_client_can_write_profile();
+    $clientId = resolve_effective_client_id();
+    if ($clientId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id requis'], 422);
+    }
+
+    $stored = store_uploaded_pdf('pdf', 'chartefournisseurclient', 'supplier_responsibility_c' . $clientId);
+    $uploadedByUserId = !empty($_SESSION['client_user_id']) ? (int)$_SESSION['client_user_id'] : null;
+
+    $pdo->prepare('INSERT INTO client_consent_documents (client_id, consent_type, file_path, original_filename, file_hash, status, uploaded_by_user_id) VALUES (:client_id, :consent_type, :file_path, :original_filename, :file_hash, "pending", :uploaded_by_user_id)')
+        ->execute([
+            ':client_id' => $clientId,
+            ':consent_type' => 'supplier_responsibility',
+            ':file_path' => $stored['file_path'],
+            ':original_filename' => $stored['original_filename'],
+            ':file_hash' => $stored['file_hash'],
+            ':uploaded_by_user_id' => $uploadedByUserId,
+        ]);
+
+    write_admin_audit($pdo, 'client_supplier_responsibility_uploaded', [
+        'target_type' => 'client',
+        'target_id' => $clientId,
+        'details' => ['consent_type' => 'supplier_responsibility'],
+    ]);
+
+    json_response(['ok' => true]);
+}
+
+function upload_supplier_consent_document(PDO $pdo): void
+{
+    assert_client_can_write_profile();
+    $clientId = resolve_effective_client_id();
+    $supplierId = isset($_POST['supplier_id']) ? (int)$_POST['supplier_id'] : 0;
+    if ($clientId <= 0 || $supplierId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id et supplier_id requis'], 422);
+    }
+
+    assert_client_has_supplier_link($pdo, $clientId, $supplierId);
+    $stored = store_uploaded_pdf('pdf', 'chartefournisseur', 'supplier_c' . $clientId . '_s' . $supplierId);
+    $uploadedByUserId = !empty($_SESSION['client_user_id']) ? (int)$_SESSION['client_user_id'] : null;
+
+    $pdo->prepare('INSERT INTO supplier_consent_documents (supplier_id, source_client_id, file_path, original_filename, file_hash, status, uploaded_by_user_id) VALUES (:supplier_id, :source_client_id, :file_path, :original_filename, :file_hash, "pending", :uploaded_by_user_id)')
+        ->execute([
+            ':supplier_id' => $supplierId,
+            ':source_client_id' => $clientId,
+            ':file_path' => $stored['file_path'],
+            ':original_filename' => $stored['original_filename'],
+            ':file_hash' => $stored['file_hash'],
+            ':uploaded_by_user_id' => $uploadedByUserId,
+        ]);
+
+    write_admin_audit($pdo, 'supplier_consent_uploaded', [
+        'target_type' => 'supplier',
+        'target_id' => $supplierId,
+        'details' => ['client_id' => $clientId],
+    ]);
+
+    json_response(['ok' => true]);
+}
+
 function geocode_address_admin(): void
 {
     $input = get_json_input();
@@ -2078,7 +2318,7 @@ function find_existing_supplier(PDO $pdo, array $supplier): ?array
 function save_supplier(PDO $pdo, string $source = 'manual'): void
 {
     $input = get_json_input();
-    persist_supplier($pdo, $input, $source, [], ['auto_geocode' => false]);
+    persist_supplier($pdo, $input, $source, [], ['auto_geocode' => true]);
     json_response(['ok' => true]);
 }
 
@@ -2122,28 +2362,6 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
         $supplier['country'] = 'France';
     }
 
-    $autoGeocode = !empty($options['auto_geocode']);
-    if ($autoGeocode && ($supplier['latitude'] === null || $supplier['longitude'] === null)) {
-        $query = implode(', ', array_values(array_filter([
-            $supplier['address'],
-            $supplier['postal_code'],
-            $supplier['city'],
-            $supplier['country'],
-        ], fn($v) => trim((string)$v) !== '')));
-
-        if ($query !== '') {
-            $geo = geocode_address_text($query);
-            if (is_array($geo)) {
-                if ($supplier['latitude'] === null && isset($geo['lat'])) {
-                    $supplier['latitude'] = (float)$geo['lat'];
-                }
-                if ($supplier['longitude'] === null && isset($geo['lng'])) {
-                    $supplier['longitude'] = (float)$geo['lng'];
-                }
-            }
-        }
-    }
-
     $existing = null;
     if ($requestedId > 0) {
         $stmt = $pdo->prepare('SELECT * FROM suppliers WHERE id=:id LIMIT 1');
@@ -2155,6 +2373,54 @@ function persist_supplier(PDO $pdo, array $input, string $source, array $resolut
     } else {
         $existing = find_existing_supplier($pdo, $supplier);
     }
+
+    $autoGeocode = !empty($options['auto_geocode']);
+    $explicitCoordinatesProvided = (($input['latitude'] ?? '') !== '' || ($input['longitude'] ?? '') !== '');
+    if ($autoGeocode && !$explicitCoordinatesProvided) {
+        $addressFieldsChanged = false;
+        if ($existing) {
+            foreach (['address', 'postal_code', 'city', 'country'] as $field) {
+                if (trim((string)($supplier[$field] ?? '')) !== trim((string)($existing[$field] ?? ''))) {
+                    $addressFieldsChanged = true;
+                    break;
+                }
+            }
+        }
+
+        $needsGeocode = !$existing
+            || $supplier['latitude'] === null
+            || $supplier['longitude'] === null
+            || $addressFieldsChanged;
+
+        if ($needsGeocode) {
+            $query = implode(', ', array_values(array_filter([
+                $supplier['address'],
+                $supplier['postal_code'],
+                $supplier['city'],
+                $supplier['country'],
+            ], static fn($v) => trim((string)$v) !== '')));
+
+            if ($query !== '') {
+                $geo = geocode_address_text($query);
+                if (is_array($geo) && isset($geo['lat'], $geo['lng'])) {
+                    $supplier['latitude'] = (float)$geo['lat'];
+                    $supplier['longitude'] = (float)$geo['lng'];
+                }
+            }
+        }
+
+        if ($existing) {
+            $existingLat = ($existing['latitude'] ?? '') !== '' ? (float)$existing['latitude'] : null;
+            $existingLng = ($existing['longitude'] ?? '') !== '' ? (float)$existing['longitude'] : null;
+            if ($supplier['latitude'] === null && $existingLat !== null) {
+                $supplier['latitude'] = $existingLat;
+            }
+            if ($supplier['longitude'] === null && $existingLng !== null) {
+                $supplier['longitude'] = $existingLng;
+            }
+        }
+    }
+
     $supplierId = null;
 
     if ($existing) {
@@ -2966,6 +3232,22 @@ function client_bootstrap(PDO $pdo): void
     $client['phone'] = format_phone($client['phone'] ?? '');
     $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
 
+    $clientConsentStmt = $pdo->prepare('SELECT status, consent_text_version, accepted_at
+        FROM client_consents
+        WHERE client_id=:client_id
+        ORDER BY accepted_at DESC, id DESC
+        LIMIT 1');
+    $clientConsentStmt->execute([':client_id' => $clientId]);
+    $clientConsent = $clientConsentStmt->fetch() ?: null;
+
+    $consents = [
+        'client_consent' => [
+            'status' => $clientConsent ? (string)($clientConsent['status'] ?? 'none') : 'none',
+            'accepted_at' => $clientConsent ? (string)($clientConsent['accepted_at'] ?? '') : '',
+            'version' => $clientConsent ? (string)($clientConsent['consent_text_version'] ?? '') : '',
+        ],
+    ];
+
     $sql = "SELECT
             s.id,
             s.name,
@@ -3009,7 +3291,54 @@ function client_bootstrap(PDO $pdo): void
                 SELECT GROUP_CONCAT(csp2.labels_text SEPARATOR '; ')
                 FROM client_supplier_profiles csp2
                 WHERE csp2.supplier_id = s.id AND csp2.client_id != :client_id3
-            ) AS other_clients_labels_text
+            ) AS other_clients_labels_text,
+            (
+                SELECT CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM supplier_consents sc
+                        WHERE sc.supplier_id = s.id
+                          AND sc.status = 'approved'
+                          AND sc.revoked_at IS NULL
+                    ) THEN 'approved'
+                    ELSE COALESCE((
+                        SELECT scr.status
+                        FROM supplier_consent_requests scr
+                        WHERE scr.supplier_id = s.id
+                        ORDER BY scr.requested_at DESC, scr.id DESC
+                        LIMIT 1
+                    ), 'none')
+                END
+            ) AS supplier_consent_status,
+            (
+                SELECT c.name
+                FROM supplier_consent_requests scr
+                JOIN clients c ON c.id = scr.source_client_id
+                WHERE scr.supplier_id = s.id
+                ORDER BY scr.requested_at DESC, scr.id DESC
+                LIMIT 1
+            ) AS supplier_consent_source_client_name,
+            (
+                SELECT scr.source_client_id
+                FROM supplier_consent_requests scr
+                WHERE scr.supplier_id = s.id
+                ORDER BY scr.requested_at DESC, scr.id DESC
+                LIMIT 1
+            ) AS supplier_consent_source_client_id,
+            (
+                SELECT scr.requested_at
+                FROM supplier_consent_requests scr
+                WHERE scr.supplier_id = s.id
+                ORDER BY scr.requested_at DESC, scr.id DESC
+                LIMIT 1
+            ) AS supplier_consent_requested_at,
+            (
+                SELECT scr.answered_at
+                FROM supplier_consent_requests scr
+                WHERE scr.supplier_id = s.id
+                ORDER BY scr.requested_at DESC, scr.id DESC
+                LIMIT 1
+            ) AS supplier_consent_answered_at
         FROM client_suppliers cs
         JOIN suppliers s ON s.id = cs.supplier_id
         LEFT JOIN client_supplier_profiles csp ON csp.client_id = cs.client_id AND csp.supplier_id = cs.supplier_id
@@ -3024,16 +3353,26 @@ function client_bootstrap(PDO $pdo): void
     $labels = $pdo->query('SELECT id, name FROM labels WHERE is_active=1 ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT id, name FROM supplier_types WHERE is_active=1 ORDER BY name')->fetchAll();
 
-    $suppliers = array_map(function (array $row) use ($pdo) {
+    $suppliers = array_map(function (array $row) use ($pdo, $clientId) {
         $row['phone'] = format_phone($row['phone'] ?? '');
         $row['logo_url'] = absolutize_export_url($pdo, (string)($row['logo_url'] ?? ''));
         $row['photo_cover_url'] = absolutize_export_url($pdo, (string)($row['photo_cover_url'] ?? ''));
+        $status = (string)($row['supplier_consent_status'] ?? 'none');
+        $row['supplier_consent_can_send'] = ($status === 'none');
+        $row['supplier_consent_can_resend'] = in_array($status, ['sent', 'opened', 'expired', 'rejected'], true);
+        $row['supplier_consent_source_client_name'] = ($row['supplier_consent_source_client_name'] ?? null);
+        $row['supplier_consent_source_client_id'] = ($row['supplier_consent_source_client_id'] ?? null) !== null ? (int)$row['supplier_consent_source_client_id'] : null;
+        if ($row['supplier_consent_source_client_id'] !== null && (int)$row['supplier_consent_source_client_id'] === $clientId) {
+            $row['supplier_consent_source_client_name'] = (string)($client['name'] ?? '');
+        }
         return $row;
     }, $suppliers);
 
     json_response([
         'ok' => true,
         'client' => $client,
+        'consents' => $consents,
+        'client_consent' => $consents['client_consent'],
         'suppliers' => $suppliers,
         'activities' => $activities,
         'labels' => $labels,
@@ -3754,18 +4093,34 @@ function review_supplier_creation_request(PDO $pdo): void
                 throw new RuntimeException('Nom fournisseur requis pour valider la demande');
             }
 
+            $address = trim((string)($request['address'] ?? ''));
+            $postalCode = trim((string)($request['postal_code'] ?? ''));
+            $city = trim((string)($request['city'] ?? ''));
+            $country = trim((string)($request['country'] ?? ''));
+            $geoQuery = implode(', ', array_values(array_filter([
+                $address,
+                $postalCode,
+                $city,
+                $country,
+            ], static fn($v) => trim((string)$v) !== '')));
+            $geo = $geoQuery !== '' ? geocode_address_text($geoQuery) : null;
+            $latitude = (is_array($geo) && isset($geo['lat'])) ? (float)$geo['lat'] : null;
+            $longitude = (is_array($geo) && isset($geo['lng'])) ? (float)$geo['lng'] : null;
+
             $insertSupplierSql = 'INSERT INTO suppliers
-                (name, normalized_name, address, city, postal_code, country, phone, email, website, supplier_type, activity_text, notes, slug, is_public, public_updated_at)
+                (name, normalized_name, address, city, postal_code, country, latitude, longitude, phone, email, website, supplier_type, activity_text, notes, slug, is_public, public_updated_at)
                 VALUES
-                (:name, :normalized_name, :address, :city, :postal_code, :country, :phone, :email, :website, :supplier_type, :activity_text, :notes, :slug, 1, NOW())';
+                (:name, :normalized_name, :address, :city, :postal_code, :country, :latitude, :longitude, :phone, :email, :website, :supplier_type, :activity_text, :notes, :slug, 1, NOW())';
 
             $pdo->prepare($insertSupplierSql)->execute([
                 ':name' => $name,
                 ':normalized_name' => normalize_text($name),
-                ':address' => trim((string)($request['address'] ?? '')),
-                ':city' => trim((string)($request['city'] ?? '')),
-                ':postal_code' => trim((string)($request['postal_code'] ?? '')),
-                ':country' => trim((string)($request['country'] ?? '')),
+                ':address' => $address,
+                ':city' => $city,
+                ':postal_code' => $postalCode,
+                ':country' => $country,
+                ':latitude' => $latitude,
+                ':longitude' => $longitude,
                 ':phone' => format_phone((string)($request['phone'] ?? '')),
                 ':email' => trim((string)($request['email'] ?? '')),
                 ':website' => trim((string)($request['website'] ?? '')),
@@ -4096,6 +4451,31 @@ function apply_change_request_decision(PDO $pdo, array $request, int $requestId,
                 ':new_value' => $newValue,
                 ':supplier_id' => (int)$request['supplier_id'],
             ]);
+
+            if (in_array($fieldName, ['address', 'postal_code', 'city', 'country'], true)) {
+                $supplierStmt = $pdo->prepare('SELECT address, postal_code, city, country FROM suppliers WHERE id=:id LIMIT 1');
+                $supplierStmt->execute([':id' => (int)$request['supplier_id']]);
+                $supplierRow = $supplierStmt->fetch() ?: null;
+                if ($supplierRow) {
+                    $query = implode(', ', array_values(array_filter([
+                        trim((string)($supplierRow['address'] ?? '')),
+                        trim((string)($supplierRow['postal_code'] ?? '')),
+                        trim((string)($supplierRow['city'] ?? '')),
+                        trim((string)($supplierRow['country'] ?? '')),
+                    ], static fn($v) => trim((string)$v) !== '')));
+                    if ($query !== '') {
+                        $geo = geocode_address_text($query);
+                        if (is_array($geo) && isset($geo['lat'], $geo['lng'])) {
+                            $pdo->prepare('UPDATE suppliers SET latitude=:latitude, longitude=:longitude, public_updated_at=NOW() WHERE id=:supplier_id')
+                                ->execute([
+                                    ':latitude' => (float)$geo['lat'],
+                                    ':longitude' => (float)$geo['lng'],
+                                    ':supplier_id' => (int)$request['supplier_id'],
+                                ]);
+                        }
+                    }
+                }
+            }
         }
 
         write_supplier_audit(
@@ -4185,13 +4565,28 @@ function review_supplier_change_requests_bulk(PDO $pdo): void
 
 function map_data(PDO $pdo): void
 {
+    start_app_session();
+    $hasPrivilegedSession = !empty($_SESSION['is_admin']) || !empty($_SESSION['is_client_user']);
+    $privateModeRequested = isset($_GET['private']) && (string)$_GET['private'] === '1';
+    $isPrivileged = $hasPrivilegedSession && $privateModeRequested;
+
     $settingsRows = $pdo->query('SELECT setting_key, setting_value FROM settings')->fetchAll();
     $settings = [];
     foreach ($settingsRows as $row) {
         $settings[$row['setting_key']] = $row['setting_value'];
     }
 
-    $clients = $pdo->query('SELECT id, name, client_type, latitude, longitude, logo_url, city, address, postal_code, phone, email, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, website FROM clients WHERE is_active=1 ORDER BY name')->fetchAll();
+        $clientWhere = 'c.is_active=1';
+    if (!$isPrivileged) {
+        $clientWhere .= " AND EXISTS (
+                        SELECT 1
+                        FROM client_consents cc
+                        WHERE cc.client_id = c.id
+                            AND cc.status = 'approved'
+                            AND cc.revoked_at IS NULL
+        )";
+    }
+    $clients = $pdo->query('SELECT c.id, c.name, c.client_type, c.latitude, c.longitude, c.logo_url, c.city, c.address, c.postal_code, c.phone, c.email, c.lundi, c.mardi, c.mercredi, c.jeudi, c.vendredi, c.samedi, c.dimanche, c.website FROM clients c WHERE ' . $clientWhere . ' ORDER BY c.name')->fetchAll();
     $clients = array_map(function (array $client) use ($pdo): array {
         $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
         return $client;
@@ -4203,6 +4598,18 @@ function map_data(PDO $pdo): void
         return $activity;
     }, $activities);
     $labels = $pdo->query('SELECT name, color FROM labels WHERE is_active=1')->fetchAll();
+
+    $publicSupplierFilter = '';
+    if (!$isPrivileged) {
+        $publicSupplierFilter = "
+        AND EXISTS (
+            SELECT 1
+            FROM supplier_consents sc
+            WHERE sc.supplier_id = s.id
+              AND sc.status = 'approved'
+              AND sc.revoked_at IS NULL
+        )";
+    }
 
     $sql = "SELECT
             s.id,
@@ -4239,6 +4646,7 @@ function map_data(PDO $pdo): void
                   AND COALESCE(csp1.relationship_status, 'active') <> 'inactive'
             )
         )
+            {$publicSupplierFilter}
         GROUP BY s.id";
     $rows = $pdo->query($sql)->fetchAll();
 
@@ -4291,4 +4699,42 @@ function map_data(PDO $pdo): void
         'activities' => $activities,
         'labels' => $labels,
     ]);
+}
+
+// REMOVED: PDF consent request functions - Phase 1 cleanup
+// See SPEC_CONSENTEMENTS.md section 16 for new implementation
+
+function review_consent_request_DISABLED(PDO $pdo): void
+{
+    $input = get_json_input();
+    $scope = trim((string)($input['request_scope'] ?? ''));
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    $decision = trim((string)($input['decision'] ?? ''));
+    $reviewNote = trim((string)($input['review_note'] ?? ''));
+
+    if (!in_array($scope, ['client', 'supplier'], true) || $id <= 0) {
+        json_response(['ok' => false, 'error' => 'Demande invalide'], 422);
+    }
+    if (!in_array($decision, ['approved', 'rejected'], true)) {
+        json_response(['ok' => false, 'error' => 'Décision invalide'], 422);
+    }
+
+    start_app_session();
+    $adminId = !empty($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : null;
+    $adminName = (string)($_SESSION['admin_username'] ?? 'admin');
+
+    if ($scope === 'client') {
+        $stmt = $pdo->prepare('UPDATE client_consent_documents SET status=:status, reviewed_by_admin_id=:reviewed_by_admin_id, reviewed_by_admin_name=:reviewed_by_admin_name, reviewed_at=NOW(), review_note=:review_note WHERE id=:id');
+    } else {
+        $stmt = $pdo->prepare('UPDATE supplier_consent_documents SET status=:status, reviewed_by_admin_id=:reviewed_by_admin_id, reviewed_by_admin_name=:reviewed_by_admin_name, reviewed_at=NOW(), review_note=:review_note WHERE id=:id');
+    }
+
+    $stmt->execute([
+        ':status' => $decision,
+        ':reviewed_by_admin_id' => $adminId,
+        ':reviewed_by_admin_name' => $adminName,
+        ':review_note' => $reviewNote,
+        ':id' => $id,
+    ]);
+
 }

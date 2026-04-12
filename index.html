@@ -260,6 +260,13 @@
 
     <div id="helpLinkContainer"><a href="#" id="helpLink">ℹ️ Besoin d'aide ?</a></div>
 
+    <div id="loginLinkContainer" style="margin-top:10px; text-align:center; padding-top:10px; border-top:1px solid #ddd;">
+      <button id="loginLink" style="background:none; border:none; color:#007bff; font-weight:bold; cursor:pointer; text-decoration:none; font-size:14px;">🔐 Se connecter</button>
+      <div id="clientSpaceContainer" style="margin-top:8px; display:none;">
+        <a id="clientSpaceLink" href="client/" style="display:inline-block; padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; text-decoration:none; color:#1f2937; font-size:13px; background:#fff;">Acceder a mon espace client</a>
+      </div>
+    </div>
+
   </div>
 
   <button id="menuToggle" aria-label="Ouvrir/fermer le menu"
@@ -268,7 +275,7 @@
   </button>
 
   <div id="map"></div>
-  
+
   <button id="toggleLeft" aria-label="Afficher/masquer le menu gauche">☰</button>
 <button id="toggleRight" aria-label="Afficher/masquer le panneau droit">⫷⫸</button>
 
@@ -278,6 +285,26 @@
   <div class="rp-header">Producteurs visibles <span id="rpCount">0</span></div>
   <div id="rightList" class="rp-list"></div>
 </div>
+
+  <!-- Modal de connexion -->
+  <div id="publicLoginModal" style="position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; z-index:2000; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:8px; padding:24px; max-width:400px; width:90%; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+      <h2 style="margin-top:0; text-align:center;">Connexion</h2>
+      <form id="publicLoginForm" onsubmit="return publicLogin(event);">
+        <label style="display:block; margin:12px 0;">
+          Utilisateur<br>
+          <input id="publicLoginUser" type="text" style="width:100%; padding:8px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px;" required/>
+        </label>
+        <label style="display:block; margin:12px 0;">
+          Mot de passe<br>
+          <input id="publicLoginPass" type="password" style="width:100%; padding:8px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px;" required/>
+        </label>
+        <div id="publicLoginMsg" style="color:red; font-size:13px; margin:10px 0; min-height:16px;"></div>
+        <button type="submit" style="width:100%; padding:10px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Se connecter</button>
+      </form>
+      <button onclick="closePublicLoginModal()" style="width:100%; margin-top:10px; padding:10px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">Annuler</button>
+    </div>
+  </div>
 
   <!-- Librairies -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -1126,7 +1153,8 @@ allClients.forEach(e => {
 
     // === 12) Chargement des données (BDD uniquement) ===
 function loadData() {
-fetch('api/index.php?action=map-data&v=' + Date.now())
+    const privateMode = localStorage.getItem('carte_private_mode') === '1' ? '1' : '0';
+    fetch('api/index.php?action=map-data&private=' + privateMode + '&v=' + Date.now())
     .then(resp => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();
@@ -1677,6 +1705,125 @@ btn.addEventListener('click', async ()=>{
 });
 }
 
+// Fonctions de connexion pour la page publique
+function openPublicLoginModal() {
+  document.getElementById('publicLoginModal').style.display = 'flex';
+}
+
+function closePublicLoginModal() {
+  document.getElementById('publicLoginModal').style.display = 'none';
+  document.getElementById('publicLoginMsg').textContent = '';
+  document.getElementById('publicLoginForm').reset();
+}
+
+async function publicLogin(event) {
+  event.preventDefault();
+  const user = document.getElementById('publicLoginUser').value.trim();
+  const pass = document.getElementById('publicLoginPass').value;
+  const msgEl = document.getElementById('publicLoginMsg');
+
+  if (!user || !pass) {
+    msgEl.textContent = 'Veuillez remplir tous les champs';
+    return false;
+  }
+
+  try {
+    msgEl.textContent = 'Connexion en cours...';
+    const resp = await fetch('api/index.php?action=auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass })
+    });
+    const data = await resp.json();
+    
+    if (!resp.ok || data.ok === false) {
+      msgEl.textContent = data.error || 'Erreur de connexion';
+      return false;
+    }
+
+    // Connexion réussie, récupérer le rôle
+    const meResp = await fetch('api/index.php?action=auth/me', {
+      credentials: 'include'
+    });
+    const me = await meResp.json();
+
+    if (me.is_admin) {
+      window.location.href = 'admin/';
+    } else if (me.is_client_user) {
+      localStorage.setItem('carte_private_mode', '1');
+      closePublicLoginModal();
+      msgEl.textContent = '';
+      const clientSpaceContainer = document.getElementById('clientSpaceContainer');
+      const clientSpaceLink = document.getElementById('clientSpaceLink');
+      if (clientSpaceContainer && clientSpaceLink) {
+        clientSpaceContainer.style.display = 'block';
+        const clientId = Number(me.client_id || 0);
+        if (clientId > 0) {
+          clientSpaceLink.href = 'client/?client_id=' + clientId;
+        }
+      }
+      window.location.reload();
+    } else {
+      msgEl.textContent = 'Compte non autorisé';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Erreur: ' + e.message;
+  }
+  return false;
+}
+
+// Event listeners pour la modale de connexion
+document.addEventListener('DOMContentLoaded', () => {
+  const loginBtn = document.getElementById('loginLink');
+  const clientSpaceContainer = document.getElementById('clientSpaceContainer');
+  const clientSpaceLink = document.getElementById('clientSpaceLink');
+  if (loginBtn) {
+    loginBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openPublicLoginModal();
+    });
+  }
+
+  const loginModal = document.getElementById('publicLoginModal');
+  if (loginModal) {
+    loginModal.addEventListener('click', (e) => {
+      if (e.target === loginModal) {
+        closePublicLoginModal();
+      }
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && loginModal && loginModal.style.display === 'flex') {
+      closePublicLoginModal();
+    }
+  });
+
+  // If already logged in as client/admin, reflect private mode on button.
+  fetch('api/index.php?action=auth/me', { credentials: 'include' })
+    .then((resp) => resp.json())
+    .then((me) => {
+      if (!me) return;
+      if (me.is_admin) {
+        if (clientSpaceContainer) clientSpaceContainer.style.display = 'none';
+        return;
+      }
+      if (me.is_client_user) {
+        if (clientSpaceContainer && clientSpaceLink) {
+          clientSpaceContainer.style.display = 'block';
+          const clientId = Number(me.client_id || 0);
+          if (clientId > 0) {
+            clientSpaceLink.href = 'client/?client_id=' + clientId;
+          }
+        }
+      } else {
+        if (clientSpaceContainer) clientSpaceContainer.style.display = 'none';
+        localStorage.removeItem('carte_private_mode');
+      }
+    })
+    .catch(() => {});
+});
 
 
   </script>
