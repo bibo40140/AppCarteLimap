@@ -4057,11 +4057,13 @@ function client_bootstrap(PDO $pdo): void
         ? json_encode(array_map(static fn(string $url): array => ['url' => $url], $galleryUrls), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         : '';
 
-    $clientConsentStmt = $pdo->prepare('SELECT status, consent_text_version, accepted_at
-        FROM client_consents
-        WHERE client_id=:client_id
-        ORDER BY accepted_at DESC, id DESC
-        LIMIT 1');
+        $clientConsentStmt = $pdo->prepare('SELECT status, consent_text_version, accepted_at
+                FROM client_consents
+                WHERE client_id=:client_id
+                    AND status = "approved"
+                    AND revoked_at IS NULL
+                ORDER BY accepted_at DESC, id DESC
+                LIMIT 1');
     $clientConsentStmt->execute([':client_id' => $clientId]);
     $clientConsent = $clientConsentStmt->fetch() ?: null;
 
