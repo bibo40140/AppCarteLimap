@@ -185,6 +185,7 @@
               <button type="button" data-editor-cmd="formatBlock" data-editor-arg="p" title="Paragraphe normal">¶</button>
               <button type="button" data-editor-cmd="insertUnorderedList" title="Liste à puces">&#8226; Liste</button>
               <button type="button" data-editor-cmd="createLink" title="Insérer un lien">&#128279; Lien</button>
+              <button type="button" data-editor-cmd="insertImage" title="Insérer une image">&#128247; Image</button>
               <button type="button" data-editor-cmd="unlink" title="Supprimer le lien">&#10006; Lien</button>
             </div>
             <div id="clientInfoDescriptionLongEditor" class="rich-editor" contenteditable="true"></div>
@@ -328,9 +329,13 @@
               <div class="section-kicker">Zone 2A</div>
               <h3 style="margin:0;">Fournisseurs liés</h3>
             </div>
-            <button id="btnGoNewSupplier" type="button">+ Nouveau</button>
+            <div class="row" style="gap:8px;">
+              <button id="btnExportAllSuppliers" type="button">Tout exporter</button>
+              <button id="btnGoNewSupplier" type="button">+ Nouveau</button>
+            </div>
           </div>
           <p class="muted rail-hint">Choisissez un fournisseur pour consulter la fiche commune, gérer votre relation et éventuellement proposer une correction globale.</p>
+          <span id="suppliersExportMsg" class="msg"></span>
           <input id="searchSupplier" placeholder="Rechercher un fournisseur..." />
           <div id="suppliersList" class="list"></div>
         </aside>
@@ -376,6 +381,20 @@
                 </div>
                 <p class="muted zone-copy">Ces informations sont communes à tous les clients liés à ce fournisseur.</p>
                 <div id="supplierGlobal" class="global-box hidden"></div>
+
+                <!-- Carte de géolocalisation fournisseur -->
+                <div id="supplierMapBox" class="hidden" style="margin-top:12px;">
+                  <p class="muted" style="margin:0 0 6px;font-size:13px;">
+                    <strong>Position sur la carte</strong> — Déplacez le marqueur pour corriger l'emplacement, puis enregistrez.
+                  </p>
+                  <div id="supplierEditorMap" style="height:260px;border-radius:8px;border:1px solid #d1d5db;"></div>
+                  <div class="row row-actions" style="margin-top:8px;gap:8px;">
+                    <button id="btnSupplierGeocode" type="button">📍 Géocoder l'adresse</button>
+                    <button id="btnSaveSupplierCoords" class="primary" type="button">💾 Enregistrer la position</button>
+                    <span id="supplierCoordsMsg" class="msg"></span>
+                  </div>
+                </div>
+
                 <div id="supplierConsentBox" class="consent-box hidden" style="margin-top:10px;">
                   <h4>Consentement fournisseur</h4>
                   <p id="supplierConsentStatus" class="muted"></p>
@@ -470,6 +489,25 @@
                 <label>
                   Nouvelle valeur proposée
                   <textarea id="changeRequestNewValue" rows="3" placeholder="Saisir la valeur proposée"></textarea>
+                  <div id="changeRequestLogoUploadWrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;">
+                    <input id="changeRequestLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+                    <input id="changeRequestLogoPath" readonly placeholder="Aucun fichier sélectionné" />
+                    <small class="muted">Le logo sera stocké dans /assets/fournisseur-logos et uniformisé.</small>
+                  </div>
+                  <div id="changeRequestLongEditorWrap" class="hidden">
+                    <div class="editor-toolbar" id="changeRequestLongEditorToolbar">
+                      <button type="button" data-editor-cmd="bold" title="Gras"><b>G</b></button>
+                      <button type="button" data-editor-cmd="italic" title="Italique"><i>I</i></button>
+                      <button type="button" data-editor-cmd="formatBlock" data-editor-arg="h2" title="Titre">H1</button>
+                      <button type="button" data-editor-cmd="formatBlock" data-editor-arg="h3" title="Sous-titre">H2</button>
+                      <button type="button" data-editor-cmd="formatBlock" data-editor-arg="p" title="Paragraphe normal">¶</button>
+                      <button type="button" data-editor-cmd="insertUnorderedList" title="Liste à puces">&#8226; Liste</button>
+                      <button type="button" data-editor-cmd="createLink" title="Insérer un lien">&#128279; Lien</button>
+                      <button type="button" data-editor-cmd="insertImage" title="Insérer une image">&#128247; Image</button>
+                      <button type="button" data-editor-cmd="unlink" title="Supprimer le lien">&#10006; Lien</button>
+                    </div>
+                    <div id="changeRequestLongEditor" class="rich-editor" contenteditable="true"></div>
+                  </div>
                   <select id="changeRequestSupplierType" class="hidden"></select>
                   <div class="multi-picker hidden" id="changeRequestActivitiesWrap">
                     <div id="changeRequestActivitiesChips" class="multi-chip-list"></div>
@@ -510,6 +548,7 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

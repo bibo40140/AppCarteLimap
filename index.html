@@ -57,6 +57,22 @@
     .client-logos img{ width:48px; height:48px; margin:2px; vertical-align:middle; border-radius:4px; border:1px solid #ccc; }
     .social-logos{ display:flex; gap:6px; align-items:center; margin:6px 0; }
 
+    /* Popup connexion carte */
+    #mapLoginModal{ position:fixed; inset:0; z-index:1600; display:none; }
+    #mapLoginModal.open{ display:block; }
+    #mapLoginModal .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.35); }
+    #mapLoginModal .dialog{
+      position:relative; max-width:420px; width:92%; margin:10vh auto 0;
+      background:#fff; border:1px solid #e6e6e6; border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.18); padding:14px;
+    }
+    #mapLoginModal label{ display:grid; gap:6px; margin-top:10px; }
+    #mapLoginModal input{ width:100%; box-sizing:border-box; padding:8px; }
+    #mapLoginModal .row{ display:flex; gap:8px; align-items:center; }
+    #mapLoginMsg{ font-size:12px; min-height:16px; color:#555; margin-top:8px; }
+    #mapForgotWrap{ display:none; margin-top:8px; border-top:1px solid #eee; padding-top:10px; }
+    #mapForgotWrap.open{ display:block; }
+
     /* Familles → catégories (accordéon par famille) */
     .famille-block{ margin:6px 0 10px 0; padding:6px; border:1px solid #eee; border-radius:6px; background:#fafafa; }
     .famille-header{ display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:4px; cursor:pointer; user-select:none; }
@@ -259,6 +275,13 @@
  
 
     <div id="helpLinkContainer"><a href="#" id="helpLink">ℹ️ Besoin d'aide ?</a></div>
+    <div id="authMenu" style="margin-top:10px;padding-top:10px;border-top:1px solid #ddd;">
+      <div id="authMenuStatus" style="font-size:12px;color:#555;margin-bottom:6px;">Mode public</div>
+      <button id="btnMapLogin" class="small-btn" type="button" style="width:100%;">Se connecter</button>
+      <button id="btnOpenClientSpace" class="small-btn" type="button" style="display:none;width:100%;">Accéder à mon espace client</button>
+      <button id="btnMapLogout" class="small-btn" type="button" style="display:none;width:100%;background:#6c757d;">Se déconnecter</button>
+      <div id="authMenuMsg" style="font-size:12px;color:#555;margin-top:4px;"></div>
+    </div>
 
   </div>
 
@@ -304,6 +327,11 @@
 let fuse = null;             // index Fuse pour producteurs
 let fuseMatchedIds = null;   // Set d'IDs (allData index) correspondant à la recherche courante
 
+    const mapAuthState = {
+      me: null,
+      privateMode: false,
+    };
+
 
     let globalFamilyToCats = new Map();
     let selectedCategories = new Set();
@@ -344,6 +372,207 @@ let fuseMatchedIds = null;   // Set d'IDs (allData index) correspondant à la re
       for (const k of aliases) { if (obj[k] != null && String(obj[k]).trim() !== '') return obj[k]; }
       return '';
     }
+
+    function setAuthMenuMessage(text = '', isError = false) {
+      const host = document.getElementById('authMenuMsg');
+      if (!host) return;
+      host.textContent = text;
+      host.style.color = isError ? '#c62828' : '#555';
+    }
+
+    function setMapLoginMessage(text = '', isError = false) {
+      const host = document.getElementById('mapLoginMsg');
+      if (!host) return;
+      host.textContent = text;
+      host.style.color = isError ? '#c62828' : '#555';
+    }
+
+    function openMapLoginModal() {
+      const modal = document.getElementById('mapLoginModal');
+      const forgotWrap = document.getElementById('mapForgotWrap');
+      if (!modal || !forgotWrap) return;
+      forgotWrap.classList.remove('open');
+      setMapLoginMessage('');
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+      setTimeout(() => {
+        document.getElementById('mapLoginUsername')?.focus();
+      }, 10);
+    }
+
+    function closeMapLoginModal() {
+      const modal = document.getElementById('mapLoginModal');
+      if (!modal) return;
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+      setMapLoginMessage('');
+    }
+
+    function renderMapAuthMenu() {
+      const statusEl = document.getElementById('authMenuStatus');
+      const btnLogin = document.getElementById('btnMapLogin');
+      const btnOpenClient = document.getElementById('btnOpenClientSpace');
+      const btnLogout = document.getElementById('btnMapLogout');
+      if (!statusEl || !btnLogin || !btnOpenClient || !btnLogout) return;
+
+      const isConnected = !!(mapAuthState.me && (mapAuthState.me.is_admin || mapAuthState.me.is_client_user));
+
+      if (isConnected && mapAuthState.privateMode) {
+        const who = mapAuthState.me.is_client_user
+          ? (mapAuthState.me.client_username || mapAuthState.me.client_name || 'client')
+          : (mapAuthState.me.username || 'admin');
+        statusEl.textContent = 'Mode privé activé (' + who + ')';
+        btnLogin.style.display = 'none';
+        btnOpenClient.style.display = '';
+        btnLogout.style.display = '';
+        return;
+      }
+
+      statusEl.textContent = 'Mode public';
+      btnLogin.style.display = '';
+      btnOpenClient.style.display = 'none';
+      btnLogout.style.display = 'none';
+    }
+
+    async function mapAuthApi(action, method = 'GET', body = null) {
+      const opts = {
+        method,
+        credentials: 'same-origin',
+        headers: {},
+      };
+      if (body) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const resp = await fetch('api/index.php?action=' + encodeURIComponent(action), opts);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + resp.status));
+      }
+      return data;
+    }
+
+    async function refreshMapAuthState() {
+      try {
+        const me = await mapAuthApi('auth/me', 'GET');
+        const isConnected = !!(me.is_admin || me.is_client_user);
+        mapAuthState.me = isConnected ? me : null;
+        mapAuthState.privateMode = isConnected;
+      } catch (e) {
+        mapAuthState.me = null;
+        mapAuthState.privateMode = false;
+      }
+      renderMapAuthMenu();
+    }
+
+    async function onMapLoginClick() {
+      setAuthMenuMessage('');
+      openMapLoginModal();
+    }
+
+    async function onMapLoginSubmit() {
+      const username = (document.getElementById('mapLoginUsername')?.value || '').trim();
+      const password = document.getElementById('mapLoginPassword')?.value || '';
+      if (!username || !password) {
+        setMapLoginMessage('Identifiant et mot de passe requis.', true);
+        return;
+      }
+
+      try {
+        await mapAuthApi('auth/login', 'POST', {
+          username,
+          password,
+        });
+        await refreshMapAuthState();
+        await loadData();
+        closeMapLoginModal();
+        setAuthMenuMessage('Connexion réussie. Mode privé activé.');
+      } catch (e) {
+        setMapLoginMessage(e.message || 'Connexion impossible', true);
+      }
+    }
+
+    async function onMapForgotPasswordSubmit() {
+      const email = (document.getElementById('mapForgotEmail')?.value || '').trim();
+      if (!email) {
+        setMapLoginMessage('Saisissez votre email.', true);
+        return;
+      }
+      try {
+        await mapAuthApi('auth/password-reset/request', 'POST', { email });
+        setMapLoginMessage('Si le compte existe, un lien de réinitialisation vient d\'être envoyé.');
+      } catch (e) {
+        setMapLoginMessage(e.message || 'Impossible d\'envoyer le lien.', true);
+      }
+    }
+
+    async function onMapLogoutClick() {
+      setAuthMenuMessage('');
+      try {
+        await mapAuthApi('auth/logout', 'POST');
+      } catch (e) {
+        // continue anyway: force local public mode
+      }
+      mapAuthState.me = null;
+      mapAuthState.privateMode = false;
+      renderMapAuthMenu();
+      await loadData();
+      setAuthMenuMessage('Retour en mode public.');
+    }
+
+    function bindMapAuthMenu() {
+      const btnLogin = document.getElementById('btnMapLogin');
+      const btnOpenClient = document.getElementById('btnOpenClientSpace');
+      const btnLogout = document.getElementById('btnMapLogout');
+      const modal = document.getElementById('mapLoginModal');
+      const btnLoginSubmit = document.getElementById('btnMapLoginSubmit');
+      const btnForgotSubmit = document.getElementById('btnMapForgotSubmit');
+      const btnTogglePwd = document.getElementById('btnMapTogglePassword');
+      const forgotLink = document.getElementById('mapForgotLink');
+      const forgotWrap = document.getElementById('mapForgotWrap');
+      const passwordInput = document.getElementById('mapLoginPassword');
+      const closeEls = modal ? modal.querySelectorAll('[data-login-close="1"]') : [];
+
+      btnLogin?.addEventListener('click', onMapLoginClick);
+      btnOpenClient?.addEventListener('click', () => {
+        window.location.href = 'client/';
+      });
+      btnLogout?.addEventListener('click', onMapLogoutClick);
+
+      btnLoginSubmit?.addEventListener('click', onMapLoginSubmit);
+      btnForgotSubmit?.addEventListener('click', onMapForgotPasswordSubmit);
+
+      document.getElementById('mapLoginPassword')?.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') onMapLoginSubmit();
+      });
+      document.getElementById('mapForgotEmail')?.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') onMapForgotPasswordSubmit();
+      });
+
+      btnTogglePwd?.addEventListener('click', () => {
+        if (!passwordInput) return;
+        const show = passwordInput.type === 'password';
+        passwordInput.type = show ? 'text' : 'password';
+        btnTogglePwd.textContent = show ? 'Masquer' : 'Afficher';
+      });
+
+      forgotLink?.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        forgotWrap?.classList.toggle('open');
+        setMapLoginMessage('');
+      });
+
+      closeEls.forEach((el) => {
+        el.addEventListener('click', closeMapLoginModal);
+      });
+
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && modal?.classList.contains('open')) {
+          closeMapLoginModal();
+        }
+      });
+    }
+
     function buildLinks(obj){
       const siteVal = getField(obj, ['site','site internet','site web','website']);
       const fbVal   = getField(obj, ['facebook','facebook_url','fb']);
@@ -1128,7 +1357,8 @@ allClients.forEach(e => {
 
     // === 12) Chargement des données (BDD uniquement) ===
 function loadData() {
-fetch('api/index.php?action=map-data&v=' + Date.now())
+const privatePart = mapAuthState.privateMode ? '&private=1' : '';
+fetch('api/index.php?action=map-data' + privatePart + '&v=' + Date.now(), { credentials: 'same-origin' })
     .then(resp => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();
@@ -1385,7 +1615,10 @@ if (!hasLat || !hasLng) {
     window.onload = () => {
       initMap();
       showWelcomePopup();
-      loadData();
+      bindMapAuthMenu();
+      refreshMapAuthState().finally(() => {
+        loadData();
+      });
 
 
       // Centre dynamique: boutons
@@ -1739,6 +1972,47 @@ btn.addEventListener('click', async ()=>{
     background:#333; color:#fff; padding:8px 10px; border-radius:6px; font-size:12px;
     opacity:0; pointer-events:none; transition:opacity .25s;">
   Fichier mis à jour ✔
+</div>
+
+<!-- Popup Connexion Carte -->
+<div id="mapLoginModal" aria-hidden="true">
+  <div class="backdrop" data-login-close="1"></div>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="map-login-title">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <h3 id="map-login-title" style="margin:0;font-size:16px;">Connexion mode privé</h3>
+      <button type="button" data-login-close="1" style="background:none;border:none;font-size:20px;line-height:1;cursor:pointer;">×</button>
+    </div>
+
+    <label>
+      Identifiant
+      <input id="mapLoginUsername" autocomplete="username" />
+    </label>
+
+    <label>
+      Mot de passe
+      <div class="row" style="gap:6px;">
+        <input id="mapLoginPassword" type="password" autocomplete="current-password" style="flex:1;" />
+        <button id="btnMapTogglePassword" type="button" style="white-space:nowrap;">Afficher</button>
+      </div>
+    </label>
+
+    <div class="row" style="justify-content:space-between;margin-top:8px;">
+      <a href="#" id="mapForgotLink" style="font-size:13px;">Mot de passe oublié ?</a>
+      <button id="btnMapLoginSubmit" class="small-btn" type="button">Se connecter</button>
+    </div>
+
+    <div id="mapForgotWrap">
+      <label>
+        Email du compte
+        <input id="mapForgotEmail" type="email" placeholder="utilisateur@domaine.fr" />
+      </label>
+      <div class="row" style="justify-content:flex-end;margin-top:8px;">
+        <button id="btnMapForgotSubmit" type="button">Envoyer le lien</button>
+      </div>
+    </div>
+
+    <div id="mapLoginMsg"></div>
+  </div>
 </div>
 </body>
 </html>

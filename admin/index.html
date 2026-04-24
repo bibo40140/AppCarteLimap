@@ -644,6 +644,19 @@
     </div>
   </div>
 
+  <!-- Modal détail trace audit -->
+  <div id="auditDetailModal" class="map-modal hidden" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+    <div class="map-modal-backdrop" id="auditModalBackdrop"></div>
+    <div class="audit-modal-card">
+      <div class="audit-modal-header">
+        <span id="auditModalDate" class="audit-modal-date"></span>
+        <button type="button" id="auditModalClose" class="audit-modal-close" aria-label="Fermer">&times;</button>
+      </div>
+      <p id="auditModalTitle" class="audit-modal-message"></p>
+      <div id="auditModalExtra" class="audit-modal-extra"></div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

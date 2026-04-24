@@ -35,6 +35,73 @@ function limap_sync_output_styles(): void
         margin: 0.5em 0 0.3em;
         color: #1a1a1a;
       }
+
+      .limap-activity-icons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6em;
+        margin-bottom: 1em;
+      }
+      .limap-activity-icon {
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+      }
+
+      /* Hide theme post title (already shown inside our content block) */
+      h1.post-title,
+      .post-title,
+      .entry-title {
+        display: none !important;
+      }
+
+      /* Force our injected title to always be visible regardless of theme CSS */
+      h1.limap-entry-name {
+        display: block !important;
+        visibility: visible !important;
+        font-size: 2em;
+        font-weight: 700;
+        margin: 0.5em 0 0.6em;
+      }
+
+      /* Hide theme featured image, date and meta bar */
+      .post-media,
+      .entry-thumbnail,
+      .post-thumbnail,
+      .custom-post-date,
+      .post-meta-style-1 {
+        display: none !important;
+      }
+
+      /* Hide theme author byline on limap supplier/client pages */
+      .post-by-author,
+      .post-meta-style-1 .post-by-author,
+      .entry-meta .author,
+      .entry-meta .byline,
+      .entry-meta .posted-by,
+      .byline,
+      .entry-byline,
+      .post-author,
+      .author-info,
+      .entry-author,
+      .author-avatar,
+      .posted-by,
+      .post-meta .author,
+      .post-meta-author,
+      .entry-header .author,
+      .entry-header .byline,
+      .singular-header .author,
+      .page-header .author,
+      .ast-author-meta,
+      .jeg_post_meta .fa-user,
+      .jeg_post_meta .author,
+      [class*="author-name"],
+      [class*="post-author"],
+      [class*="by-author"],
+      span.author,
+      a[rel="author"] {
+        display: none !important;
+      }
       .limap-client-sync h2 {
         font-size: 1.8em;
         font-weight: 600;
@@ -88,17 +155,30 @@ function limap_sync_output_styles(): void
         background: #f9f9f9;
         border-radius: 8px;
         padding: 1.5em;
+        overflow: hidden;
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
       .project-info p {
         margin: 1em 0;
         display: flex;
         align-items: flex-start;
         gap: 0.8em;
+        min-width: 0;
+      }
+      .project-info p > *:last-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .project-info strong {
         display: block;
-        min-width: 120px;
+        min-width: 100px;
+        max-width: 120px;
         flex-shrink: 0;
+      }
+      .project-info a {
+        word-break: break-all;
       }
 
       .limap-gallery {
@@ -187,6 +267,101 @@ function limap_sync_output_styles(): void
     </style>
     <?php
 }
+
+add_filter('the_author', function (string $displayName): string {
+  $supplierType = limap_sync_get_supplier_post_type();
+  if (is_singular('client') || is_singular($supplierType)) {
+    return '';
+  }
+  return $displayName;
+});
+
+add_filter('the_author_posts_link', function (string $link): string {
+  $supplierType = limap_sync_get_supplier_post_type();
+  if (is_singular('client') || is_singular($supplierType)) {
+    return '';
+  }
+  return $link;
+});
+
+add_filter('get_the_author_display_name', function (string $name): string {
+  $supplierType = limap_sync_get_supplier_post_type();
+  if (is_singular('client') || is_singular($supplierType)) {
+    return '';
+  }
+  return $name;
+});
+
+// Fallback: inject supplier/client name into content if missing, with forced visibility.
+add_filter('the_content', function (string $content): string {
+  $supplierType = limap_sync_get_supplier_post_type();
+  $isClient   = is_singular('client');
+  $isSupplier = is_singular($supplierType);
+
+  if ((!$isClient && !$isSupplier) || !in_the_loop() || !is_main_query()) {
+    return $content;
+  }
+
+  if (strpos($content, 'limap-client-sync') === false) {
+    return $content;
+  }
+
+  $title = esc_html(get_the_title());
+  if ($title === '') {
+    return $content;
+  }
+
+  // Replace any existing bare h1 (without forced style) so we can normalise it.
+  $titleHtml = '<h1 class="limap-entry-name" style="display:block!important;visibility:visible!important;font-size:2em;font-weight:700;margin:0.5em 0 0.6em;">'
+             . $title . '</h1>';
+
+  // If an h1 already has our class, nothing to do.
+  if (strpos($content, 'limap-entry-name') !== false) {
+    return $content;
+  }
+
+  // Replace existing plain h1 inside our block with the forced one.
+  if (preg_match('/<h1\b/i', $content) === 1) {
+    return preg_replace('/<h1(\b[^>]*)>(.*?)<\/h1>/is', $titleHtml, $content, 1);
+  }
+
+  // No h1 at all: inject after .left-col opening div.
+  $marker = '<div class="left-col">';
+  if (strpos($content, $marker) !== false) {
+    return str_replace($marker, $marker . "\n" . $titleHtml, $content);
+  }
+
+  return $titleHtml . $content;
+}, 9);
+
+// JS fallback for themes that hardcode "by" text around the author
+add_action('wp_footer', function (): void {
+  $supplierType = limap_sync_get_supplier_post_type();
+  if (!is_singular('client') && !is_singular($supplierType)) {
+    return;
+  }
+  ?>
+  <script>
+  (function() {
+    var selectors = [
+      '.post-by-author', '.byline', '.entry-byline', '.posted-by', '.post-author',
+      '.entry-meta .author', '.entry-header .author', 'span.author',
+      'a[rel="author"]', '.author-info', '.ast-author-meta'
+    ];
+    selectors.forEach(function(sel) {
+      document.querySelectorAll(sel).forEach(function(el) {
+        // Hide the element and its parent if parent only contains byline
+        var parent = el.parentElement;
+        el.style.display = 'none';
+        if (parent && parent.textContent.trim().replace(/^by\s*/i, '').trim() === '') {
+          parent.style.display = 'none';
+        }
+      });
+    });
+  })();
+  </script>
+  <?php
+});
 
 add_action('rest_api_init', function (): void {
     register_rest_route('limap-sync/v1', '/clients', [
@@ -426,6 +601,7 @@ function limap_sync_render_client_content(array $client): string
           <?php endif; ?>
         </div>
         <h1><?php echo $title; ?></h1>
+
         <?php if ($desc !== ''): ?>
           <div><?php echo $desc; ?></div>
         <?php endif; ?>
@@ -765,6 +941,8 @@ function limap_sync_render_client_content(array $client): string
     $facebook = esc_url($f('facebook_url') !== '' ? $f('facebook_url') : $f('facebook'));
     $instagram = esc_url($f('instagram_url') !== '' ? $f('instagram_url') : $f('instagram'));
     $linkedin = esc_url($f('linkedin_url') !== '' ? $f('linkedin_url') : $f('linkedin'));
+    $activityIconsStr = $f('activity_icons');
+    $activityIcons = $activityIconsStr !== '' ? array_values(array_filter(preg_split('/\s*;\s*/', $activityIconsStr) ?: [])) : [];
 
     ob_start();
     ?>
@@ -776,6 +954,13 @@ function limap_sync_render_client_content(array $client): string
         <?php endif; ?>
       </div>
       <h1><?php echo $title; ?></h1>
+      <?php if (!empty($activityIcons)): ?>
+      <div class="limap-activity-icons">
+        <?php foreach ($activityIcons as $iconUrl): ?>
+          <img src="<?php echo esc_url($iconUrl); ?>" alt="" loading="lazy" class="limap-activity-icon" />
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
       <?php if ($short !== ''): ?><p><?php echo $short; ?></p><?php endif; ?>
       <?php if ($desc !== ''): ?><div><?php echo $desc; ?></div><?php endif; ?>
       </div>

@@ -335,6 +335,14 @@ try {
             upload_client_logo();
             break;
 
+        case 'client/upload/supplier-logo':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            upload_supplier_logo();
+            break;
+
         case 'client/upload/gallery-images':
             require_client_or_admin();
             if ($method !== 'POST') {
@@ -365,6 +373,14 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             save_client_supplier_profile($pdo);
+            break;
+
+        case 'client/supplier/update-coordinates':
+            require_client_or_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            update_supplier_coordinates($pdo);
             break;
 
         case 'client/supplier-create-request/save':
@@ -709,7 +725,7 @@ function admin_bootstrap(PDO $pdo): void
     $clientUsers = $pdo->query('SELECT cu.id, cu.client_id, cu.username, cu.email, cu.role, cu.is_active, cu.last_login_at, cu.created_at, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id ORDER BY c.name, cu.username')->fetchAll();
     $adminUsers = $pdo->query('SELECT id, username, email, is_active, last_login_at, created_at FROM admin_users ORDER BY username')->fetchAll();
     $resetAudit = $pdo->query('SELECT id, user_type, user_id, username, email, status, error_message, created_at FROM password_reset_audit ORDER BY id DESC LIMIT 30')->fetchAll();
-    $auditLogs = $pdo->query('SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log ORDER BY id DESC LIMIT 150')->fetchAll();
+    $auditLogs = $pdo->query('SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log ORDER BY id DESC LIMIT 5000')->fetchAll();
     $activities = $pdo->query('SELECT * FROM activities ORDER BY family, name')->fetchAll();
     $labels = $pdo->query('SELECT * FROM labels ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT * FROM supplier_types ORDER BY name')->fetchAll();
@@ -864,11 +880,11 @@ function list_admin_audit_logs(PDO $pdo): void
 {
     ensure_admin_audit_log_table($pdo);
 
-    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 150;
+    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 500;
     if ($limit <= 0) {
-        $limit = 150;
+        $limit = 500;
     }
-    $limit = min($limit, 500);
+    $limit = min($limit, 5000);
 
     $action = trim((string)($_GET['action_name'] ?? ''));
     $actorType = trim((string)($_GET['actor_type'] ?? ''));
@@ -1604,6 +1620,15 @@ function build_supplier_sync_payload(PDO $pdo, int $supplierId): array
     $logoUrl = absolutize_export_url($pdo, (string)($supplier['logo_url'] ?? ''));
     $coverUrl = absolutize_export_url($pdo, (string)($supplier['photo_cover_url'] ?? ''));
 
+    $iconsStmt = $pdo->prepare(
+        'SELECT GROUP_CONCAT(DISTINCT a.icon_url ORDER BY a.name SEPARATOR \'; \')
+         FROM supplier_activities sa
+         JOIN activities a ON a.id = sa.activity_id
+         WHERE sa.supplier_id = :id AND TRIM(COALESCE(a.icon_url, \'\')) <> \'\''
+    );
+    $iconsStmt->execute([':id' => $supplierId]);
+    $activityIcons = absolutize_export_url_list($pdo, (string)($iconsStmt->fetchColumn() ?? ''));
+
     return [
         'event' => $operation === 'delete' ? 'supplier_delete' : 'supplier_upsert',
         'operation' => $operation,
@@ -1628,6 +1653,7 @@ function build_supplier_sync_payload(PDO $pdo, int $supplierId): array
         'linkedin_url' => $linkedinUrl,
         'logo_url' => $logoUrl,
         'photo_cover_url' => $coverUrl,
+        'activity_icons' => $activityIcons,
         'is_public' => (int)($supplier['is_public'] ?? 0) === 1,
         'deleted' => !$publicVisible,
         'public_visible' => $publicVisible,
@@ -1654,6 +1680,7 @@ function build_supplier_sync_payload(PDO $pdo, int $supplierId): array
             'linkedin_url' => $linkedinUrl,
             'logo_url' => $logoUrl,
             'photo_cover_url' => $coverUrl,
+            'activity_icons' => $activityIcons,
             'public_visible' => $publicVisible,
             'operation' => $operation,
         ],
@@ -2593,6 +2620,167 @@ function upload_client_logo(): void
     $url = '/uploads/clients/' . $filename;
 
     json_response(['ok' => true, 'url' => $url]);
+}
+
+function limap_create_image_from_mime(string $path, string $mime)
+{
+    if (!function_exists('imagecreatefromjpeg')) {
+        return false;
+    }
+
+    switch ($mime) {
+        case 'image/jpeg':
+            return @imagecreatefromjpeg($path);
+        case 'image/png':
+            return @imagecreatefrompng($path);
+        case 'image/webp':
+            return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
+        case 'image/gif':
+            return @imagecreatefromgif($path);
+        default:
+            return false;
+    }
+}
+
+function limap_save_image_by_mime($image, string $path, string $mime): bool
+{
+    switch ($mime) {
+        case 'image/jpeg':
+            return @imagejpeg($image, $path, 88);
+        case 'image/png':
+            return @imagepng($image, $path, 6);
+        case 'image/webp':
+            return function_exists('imagewebp') ? @imagewebp($image, $path, 88) : false;
+        case 'image/gif':
+            return @imagegif($image, $path);
+        default:
+            return false;
+    }
+}
+
+function limap_render_square_logo(string $sourcePath, string $mime, string $destPath, int $size = 220): bool
+{
+    if (!function_exists('imagecreatetruecolor') || !function_exists('getimagesize')) {
+        return false;
+    }
+
+    $src = limap_create_image_from_mime($sourcePath, $mime);
+    if ($src === false) {
+        return false;
+    }
+
+    $info = @getimagesize($sourcePath);
+    $srcW = (int)($info[0] ?? 0);
+    $srcH = (int)($info[1] ?? 0);
+    if ($srcW <= 0 || $srcH <= 0) {
+        imagedestroy($src);
+        return false;
+    }
+
+    $thumb = imagecreatetruecolor($size, $size);
+    if ($thumb === false) {
+        imagedestroy($src);
+        return false;
+    }
+
+    $isTransparentTarget = ($mime === 'image/png' || $mime === 'image/webp' || $mime === 'image/gif');
+    if ($isTransparentTarget) {
+        imagealphablending($thumb, false);
+        imagesavealpha($thumb, true);
+        $transparent = imagecolorallocatealpha($thumb, 0, 0, 0, 127);
+        imagefill($thumb, 0, 0, $transparent);
+    } else {
+        $white = imagecolorallocate($thumb, 255, 255, 255);
+        imagefill($thumb, 0, 0, $white);
+    }
+
+    $scale = min($size / $srcW, $size / $srcH);
+    $drawW = max(1, (int)round($srcW * $scale));
+    $drawH = max(1, (int)round($srcH * $scale));
+    $dstX = (int)floor(($size - $drawW) / 2);
+    $dstY = (int)floor(($size - $drawH) / 2);
+
+    imagecopyresampled($thumb, $src, $dstX, $dstY, 0, 0, $drawW, $drawH, $srcW, $srcH);
+    $saved = limap_save_image_by_mime($thumb, $destPath, $mime);
+
+    imagedestroy($thumb);
+    imagedestroy($src);
+
+    return $saved;
+}
+
+function upload_supplier_logo(): void
+{
+    if (empty($_FILES['logo']) || !is_array($_FILES['logo'])) {
+        json_response(['ok' => false, 'error' => 'Fichier logo manquant'], 422);
+    }
+
+    $file = $_FILES['logo'];
+    if (!empty($file['error'])) {
+        json_response(['ok' => false, 'error' => 'Erreur upload (' . (int)$file['error'] . ')'], 422);
+    }
+
+    $tmpPath = $file['tmp_name'] ?? '';
+    if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+        json_response(['ok' => false, 'error' => 'Upload invalide'], 422);
+    }
+
+    $maxSize = 5 * 1024 * 1024;
+    if (($file['size'] ?? 0) > $maxSize) {
+        json_response(['ok' => false, 'error' => 'Image trop volumineuse (max 5MB)'], 422);
+    }
+
+    $mime = mime_content_type($tmpPath) ?: '';
+    $extByMime = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/gif' => 'gif',
+    ];
+
+    if (!isset($extByMime[$mime])) {
+        json_response(['ok' => false, 'error' => 'Format image non supporté'], 422);
+    }
+
+    $supplierId = (int)($_POST['supplier_id'] ?? 0);
+    $supplierName = trim((string)($_POST['supplier_name'] ?? ''));
+    if ($supplierId <= 0) {
+        json_response(['ok' => false, 'error' => 'supplier_id requis'], 422);
+    }
+
+    $baseName = slugify_text($supplierName !== '' ? $supplierName : 'fournisseur');
+    if ($baseName === '') {
+        $baseName = 'fournisseur';
+    }
+    $baseName .= '-id-' . $supplierId;
+
+    $rootDir = dirname(__DIR__);
+    $targetDir = $rootDir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'fournisseur-logos';
+    if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+        json_response(['ok' => false, 'error' => 'Impossible de créer le dossier upload'], 500);
+    }
+
+    $pattern = $targetDir . DIRECTORY_SEPARATOR . $baseName . '.*';
+    $previous = glob($pattern) ?: [];
+    foreach ($previous as $oldPath) {
+        if (is_file($oldPath)) {
+            @unlink($oldPath);
+        }
+    }
+
+    $filename = $baseName . '.' . $extByMime[$mime];
+    $destPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+
+    $standardized = limap_render_square_logo($tmpPath, $mime, $destPath, 220);
+    if (!$standardized && !move_uploaded_file($tmpPath, $destPath)) {
+        json_response(['ok' => false, 'error' => 'Impossible de déplacer le fichier uploadé'], 500);
+    }
+
+    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api')), '/');
+    $baseWebPath = preg_replace('#/api$#', '', $scriptDir);
+    $url = ($baseWebPath ?: '') . '/assets/fournisseur-logos/' . $filename;
+
+    json_response(['ok' => true, 'url' => $url, 'standardized' => $standardized]);
 }
 
 function upload_client_gallery_images(): void
@@ -4468,6 +4656,63 @@ function save_client_supplier_profile(PDO $pdo): void
     }
 
     json_response(['ok' => true]);
+}
+
+function update_supplier_coordinates(PDO $pdo): void
+{
+    assert_client_can_write_profile();
+
+    $input = get_json_input();
+    $clientId = resolve_effective_client_id($input);
+    $supplierId = isset($input['supplier_id']) ? (int)$input['supplier_id'] : 0;
+    $lat = isset($input['latitude']) ? $input['latitude'] : null;
+    $lng = isset($input['longitude']) ? $input['longitude'] : null;
+
+    if ($clientId <= 0 || $supplierId <= 0) {
+        json_response(['ok' => false, 'error' => 'client_id et supplier_id requis'], 422);
+    }
+
+    $latFloat = $lat !== null && $lat !== '' ? (float)$lat : null;
+    $lngFloat = $lng !== null && $lng !== '' ? (float)$lng : null;
+
+    if ($latFloat === null || $lngFloat === null ||
+        !is_finite($latFloat) || !is_finite($lngFloat) ||
+        $latFloat < -90 || $latFloat > 90 ||
+        $lngFloat < -180 || $lngFloat > 180) {
+        json_response(['ok' => false, 'error' => 'Coordonnées invalides'], 422);
+    }
+
+    assert_client_has_supplier_link($pdo, $clientId, $supplierId);
+
+    $stmt = $pdo->prepare('SELECT latitude, longitude FROM suppliers WHERE id=:id LIMIT 1');
+    $stmt->execute([':id' => $supplierId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_response(['ok' => false, 'error' => 'Fournisseur introuvable'], 404);
+    }
+    $oldLat = $row['latitude'];
+    $oldLng = $row['longitude'];
+
+    $pdo->prepare('UPDATE suppliers SET latitude=:lat, longitude=:lng, public_updated_at=NOW() WHERE id=:id')
+        ->execute([':lat' => $latFloat, ':lng' => $lngFloat, ':id' => $supplierId]);
+
+    write_supplier_audit($pdo, $supplierId, 'client_coordinates_updated', 'latitude', (string)$oldLat, (string)$latFloat, ['client_id' => $clientId, 'old_lng' => $oldLng, 'new_lng' => $lngFloat]);
+
+    $metaStmt = $pdo->prepare('SELECT c.name AS client_name, s.name AS supplier_name FROM clients c JOIN suppliers s ON s.id=:supplier_id WHERE c.id=:client_id LIMIT 1');
+    $metaStmt->execute([':client_id' => $clientId, ':supplier_id' => $supplierId]);
+    $meta = $metaStmt->fetch() ?: [];
+    $supplierName = trim((string)($meta['supplier_name'] ?? 'supplier#' . $supplierId));
+
+    write_admin_audit($pdo, 'supplier_coordinates_updated', [
+        'target_type' => 'supplier',
+        'target_id' => $supplierId,
+        'target_label' => $supplierName,
+        'details' => ['lat' => $latFloat, 'lng' => $lngFloat, 'client_id' => $clientId],
+    ]);
+
+    sync_supplier_to_wordpress($pdo, $supplierId);
+
+    json_response(['ok' => true, 'lat' => $latFloat, 'lng' => $lngFloat]);
 }
 
 function allowed_global_change_fields(): array

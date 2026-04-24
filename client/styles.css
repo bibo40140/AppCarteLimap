@@ -477,6 +477,13 @@ button.primary {
 .rich-editor p  { margin: 0.4em 0; }
 .rich-editor ul { padding-left: 1.4em; margin: 0.4em 0; }
 .rich-editor a  { color: #2563eb; text-decoration: underline; }
+.rich-editor img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 10px 0;
+  border-radius: 8px;
+}
 
 .client-map {
   height: 280px;

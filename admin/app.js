@@ -497,11 +497,11 @@ function renderAuditLogs() {
     return;
   }
 
-  const rows = filtered.map((r) => {
+  const rows = filtered.map((r, idx) => {
     const details = r.details_json ? escapeHtml(String(r.details_json)) : '—';
     const kind = classifyLogKind(r);
     return `
-      <tr>
+      <tr class="audit-row-clickable" data-audit-idx="${idx}">
         <td>${escapeHtml(String(r.created_at || ''))}</td>
         <td>${escapeHtml(String(kind || ''))}</td>
         <td>${escapeHtml(String(r.actor_type || ''))}</td>
@@ -516,6 +516,264 @@ function renderAuditLogs() {
   }).join('');
 
   host.innerHTML = `<table><thead><tr><th>Date</th><th>Nature</th><th>Type acteur</th><th>Acteur</th><th>Action</th><th>Type cible</th><th>Cible</th><th>Détails</th><th>IP</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  host.querySelectorAll('tr[data-audit-idx]').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const idx = parseInt(tr.getAttribute('data-audit-idx'), 10);
+      openAuditDetailModal(filtered[idx]);
+    });
+  });
+}
+
+// ── Audit detail modal ────────────────────────────────────────────────
+
+function resolveTargetName(row) {
+  let name = row.target_label || null;
+  if (!name && row.target_id) {
+    if (row.target_type === 'supplier') {
+      const s = (state.suppliers || []).find(s => String(s.id) === String(row.target_id));
+      if (s) name = s.name;
+    } else if (row.target_type === 'client') {
+      const c = (state.clients || []).find(c => String(c.id) === String(row.target_id));
+      if (c) name = c.name;
+    }
+    if (!name) name = `#${row.target_id}`;
+  }
+  return name || null;
+}
+
+function fieldLabelFr(fieldName) {
+  const map = {
+    name: 'nom', logo_url: 'logo', phone: 'téléphone', email: 'e-mail',
+    website: 'site web', facebook_url: 'Facebook', instagram_url: 'Instagram',
+    linkedin_url: 'LinkedIn', description_short: 'description courte',
+    description_long: 'description longue', address: 'adresse', city: 'ville',
+    postal_code: 'code postal', country: 'pays', activity_text: 'activités',
+    labels: 'labels', supplier_type: 'type de fournisseur',
+  };
+  return map[fieldName] || fieldName;
+}
+
+function actorLabelFr(row) {
+  const name = row.actor_name || '(inconnu)';
+  if (row.actor_type === 'admin') return `L'admin <strong>${escapeHtml(name)}</strong>`;
+  if (row.actor_type === 'client_user') return `L'utilisateur <strong>${escapeHtml(name)}</strong>`;
+  if (row.actor_type === 'anonymous') return `Un visiteur anonyme (<strong>${escapeHtml(name)}</strong>)`;
+  return `<strong>${escapeHtml(name)}</strong>`;
+}
+
+function humanizeAuditLog(row) {
+  let details = {};
+  try {
+    details = row.details_json ? (typeof row.details_json === 'string' ? JSON.parse(row.details_json) : row.details_json) : {};
+  } catch (e) { /* ignore */ }
+
+  const actor = actorLabelFr(row);
+  const action = String(row.action_name || '');
+  const target = resolveTargetName(row);
+  const T = target ? `<strong>${escapeHtml(target)}</strong>` : null;
+
+  const clientFromId = (id) => {
+    const c = (state.clients || []).find(c => String(c.id) === String(id));
+    return c ? `<strong>${escapeHtml(c.name)}</strong>` : `client #${id}`;
+  };
+
+  let msg = '';
+
+  switch (action) {
+    case 'auth_login_success':
+      msg = `${actor} s'est connecté(e) avec succès.`;
+      if (details.auth_role === 'admin') msg += ' Accès administrateur.';
+      else if (details.client_id) msg += ` Espace client ${clientFromId(details.client_id)}.`;
+      break;
+    case 'auth_login_failed':
+      msg = `Tentative de connexion échouée pour <strong>${escapeHtml(row.actor_name || '?')}</strong>.`;
+      if (details.reason === 'missing_credentials') msg += ' Identifiants manquants.';
+      else if (details.reason === 'invalid_credentials') msg += ' Identifiants incorrects.';
+      break;
+    case 'auth_logout':
+      msg = `${actor} s'est déconnecté(e).`;
+      break;
+    case 'wordpress_sync_client_ok':
+      msg = `${actor} a synchronisé le client ${T || '(inconnu)'} vers WordPress avec succès.`;
+      break;
+    case 'wordpress_sync_client_failed':
+      msg = `Échec de la synchronisation du client ${T || '(inconnu)'} vers WordPress.`;
+      if (details.reason === 'missing_config') msg += ' Configuration WordPress manquante.';
+      else if (details.error) msg += ` Erreur : ${escapeHtml(String(details.error))}`;
+      break;
+    case 'wordpress_sync_supplier_ok':
+      msg = `${actor} a synchronisé le fournisseur ${T || '(inconnu)'} vers WordPress avec succès.`;
+      break;
+    case 'wordpress_sync_supplier_failed':
+      msg = `Échec de la synchronisation du fournisseur ${T || '(inconnu)'} vers WordPress.`;
+      if (details.reason === 'missing_config') msg += ' Configuration WordPress manquante.';
+      else if (details.error) msg += ` Erreur : ${escapeHtml(String(details.error))}`;
+      break;
+    case 'client_user_created':
+      msg = `${actor} a créé l'utilisateur ${T || '(inconnu)'}`;
+      if (details.client_id) msg += ` pour le client ${clientFromId(details.client_id)}`;
+      if (details.role) msg += `, avec le rôle <strong>${escapeHtml(details.role)}</strong>`;
+      msg += '.';
+      break;
+    case 'client_user_updated':
+      msg = `${actor} a modifié l'utilisateur ${T || '(inconnu)'}`;
+      if (details.role) msg += ` (rôle : ${escapeHtml(details.role)})`;
+      msg += '.';
+      break;
+    case 'client_user_deleted':
+      msg = `${actor} a supprimé l'utilisateur ${T || '(inconnu)'}.`;
+      break;
+    case 'client_user_toggled':
+      msg = `${actor} a ${details.is_active ? '<strong>activé</strong>' : '<strong>désactivé</strong>'} l'utilisateur ${T || '(inconnu)'}.`;
+      break;
+    case 'client_user_password_reset':
+      msg = `${actor} a réinitialisé le mot de passe de l'utilisateur ${T || '(inconnu)'}.`;
+      break;
+    case 'client_user_reset_link_sent':
+      msg = `${actor} a envoyé un lien de réinitialisation de mot de passe à l'utilisateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_created':
+      msg = `${actor} a créé l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_updated':
+      msg = `${actor} a modifié l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_deleted':
+      msg = `${actor} a supprimé l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_toggled':
+      msg = `${actor} a ${details.is_active ? '<strong>activé</strong>' : '<strong>désactivé</strong>'} l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_password_reset':
+      msg = `${actor} a réinitialisé le mot de passe de l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'admin_user_reset_link_sent':
+      msg = `${actor} a envoyé un lien de réinitialisation à l'administrateur ${T || '(inconnu)'}.`;
+      break;
+    case 'client_consent_confirmed':
+      msg = `${actor} a confirmé le consentement RGPD pour le client ${T || '(inconnu)'}.`;
+      break;
+    case 'client_consent_revoked':
+      msg = `${actor} a révoqué le consentement RGPD du client ${T || '(inconnu)'}.`;
+      break;
+    case 'client_consent_revoked_by_admin':
+      msg = `${actor} (admin) a révoqué le consentement RGPD du client ${T || '(inconnu)'}.`;
+      break;
+    case 'supplier_consent_request_sent':
+      msg = `${actor} a envoyé une demande de consentement au fournisseur ${T || '(inconnu)'}.`;
+      break;
+    case 'supplier_consent_request_resent':
+      msg = `${actor} a renvoyé une demande de consentement au fournisseur ${T || '(inconnu)'}.`;
+      break;
+    case 'supplier_consent_approved':
+      msg = `Le fournisseur ${T || '(inconnu)'} a <strong>approuvé</strong> le consentement RGPD.`;
+      break;
+    case 'supplier_consent_rejected':
+      msg = `Le fournisseur ${T || '(inconnu)'} a <strong>refusé</strong> le consentement RGPD.`;
+      break;
+    case 'supplier_consent_revoked_by_admin':
+      msg = `${actor} (admin) a révoqué le consentement du fournisseur ${T || '(inconnu)'}.`;
+      break;
+    case 'supplier_creation_request_submitted':
+      msg = `${actor} a soumis une demande de <strong>création de fournisseur</strong>`;
+      if (T) msg += ` : ${T}`;
+      msg += '.';
+      break;
+    case 'supplier_link_request_submitted':
+      msg = `${actor} a soumis une demande de <strong>rattachement au fournisseur</strong> ${T || '(inconnu)'}.`;
+      break;
+    case 'supplier_change_request_submitted':
+    case 'change_request_created': {
+      const field = details.field_name || details.field || null;
+      msg = `${actor} a soumis une demande de modification`;
+      if (field) msg += ` du champ <strong>${escapeHtml(fieldLabelFr(field))}</strong>`;
+      if (T) msg += ` pour le fournisseur ${T}`;
+      msg += '.';
+      break;
+    }
+    case 'change_request_approved':
+    case 'change_request_approved_apply': {
+      const field = details.field_name || details.field || null;
+      msg = `${actor} a <strong>approuvé</strong> la demande de modification`;
+      if (field) msg += ` du champ <strong>${escapeHtml(fieldLabelFr(field))}</strong>`;
+      if (T) msg += ` pour le fournisseur ${T}`;
+      msg += '.';
+      break;
+    }
+    case 'change_request_rejected': {
+      const field = details.field_name || details.field || null;
+      msg = `${actor} a <strong>refusé</strong> la demande de modification`;
+      if (field) msg += ` du champ <strong>${escapeHtml(fieldLabelFr(field))}</strong>`;
+      if (T) msg += ` pour le fournisseur ${T}`;
+      if (details.review_note) msg += `. Motif : ${escapeHtml(details.review_note)}`;
+      msg += '.';
+      break;
+    }
+    case 'client_profile_saved':
+    case 'client_account_updated':
+      msg = `${actor} a mis à jour le profil du client ${T || '(inconnu)'}.`;
+      break;
+    case 'client_profile_update': {
+      const field = details.field_name || details.field || null;
+      msg = `${actor} a modifié`;
+      if (field) msg += ` le champ <strong>${escapeHtml(fieldLabelFr(field))}</strong>`;
+      if (T) msg += ` du fournisseur ${T}`;
+      msg += '.';
+      break;
+    }
+    default:
+      if (action.startsWith('ui_visit')) {
+        const tab = details.tab || details.page || '';
+        const app = details.app || '';
+        msg = `${actor} a consulté`;
+        if (tab) msg += ` l'onglet <strong>${escapeHtml(tab)}</strong>`;
+        if (app) msg += ` (espace ${escapeHtml(app)})`;
+        msg += '.';
+      } else {
+        msg = `${actor} — action : <strong>${escapeHtml(action)}</strong>`;
+        if (T) msg += ` sur ${T}`;
+        msg += '.';
+      }
+  }
+
+  // Extra details table rows
+  const extraRows = [];
+  if (row.ip_address) extraRows.push(['Adresse IP', row.ip_address]);
+  if (details.old_value !== undefined && details.old_value !== null && details.old_value !== '') {
+    extraRows.push(['Ancienne valeur', String(details.old_value)]);
+  }
+  if (details.new_value !== undefined && details.new_value !== null && details.new_value !== '') {
+    extraRows.push(['Nouvelle valeur', String(details.new_value)]);
+  }
+  if (details.review_note && action !== 'change_request_rejected') {
+    extraRows.push(['Note', details.review_note]);
+  }
+  if (details.error) extraRows.push(['Erreur technique', details.error]);
+
+  return { message: msg, extraRows };
+}
+
+function openAuditDetailModal(row) {
+  const modal = q('auditDetailModal');
+  if (!modal) return;
+  const { message, extraRows } = humanizeAuditLog(row);
+  q('auditModalDate').textContent = row.created_at || '';
+  q('auditModalTitle').innerHTML = message;
+  const extraEl = q('auditModalExtra');
+  if (extraRows.length) {
+    extraEl.innerHTML = '<table>' + extraRows.map(([k, v]) =>
+      `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`
+    ).join('') + '</table>';
+  } else {
+    extraEl.innerHTML = '';
+  }
+  modal.classList.remove('hidden');
+}
+
+function closeAuditDetailModal() {
+  const modal = q('auditDetailModal');
+  if (modal) modal.classList.add('hidden');
 }
 
 function renderResetAudit() {
@@ -3297,6 +3555,12 @@ function bindEvents() {
 
   document.querySelectorAll('[data-map-close]').forEach(el => {
     el.addEventListener('click', () => closeMapEditor());
+  });
+
+  q('auditModalClose').addEventListener('click', () => closeAuditDetailModal());
+  q('auditModalBackdrop').addEventListener('click', () => closeAuditDetailModal());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAuditDetailModal();
   });
 
   q('btnMapEditorSave').addEventListener('click', () => {

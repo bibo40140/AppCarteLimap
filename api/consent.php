@@ -704,11 +704,12 @@ function send_supplier_consent_email(PDO $pdo, string $email, string $clientName
 
     $subject = '[LIMAP] Demande de consentement fournisseur';
     $body = "Bonjour,\n\n"
-        . "L'adhérent  \"{$clientName}\" vous demande de confirmer votre consentement pour l'affichage public de votre fiche sur la carte et le site LIMAP.\n\n"
+        . "\"{$clientName}\" , adhérent du réseau LIMAP 40 vous demande de confirmer votre consentement pour l'affichage public de votre fiche sur la carte et le site LIMAP.\n\n"
         . "Cliquez sur ce lien pour repondre :\n{$consentLink}\n\n"
         . "Ce lien est valable 14 jours.\n\n"
         . "Si vous n'etes pas concerne, ignorez simplement cet email.\n\n"
-        . "--\nLIMAP";
+        . "L'equipe en charge du site internet\n"
+        . "LIMAP";
 
     $smtp = get_notification_mail_config($pdo);
     if (trim((string)($smtp['host'] ?? '')) !== '') {

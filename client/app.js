@@ -22,6 +22,11 @@ const mapState = {
   marker: null,
 };
 
+const supplierMapState = {
+  map: null,
+  marker: null,
+};
+
 const q = (id) => document.getElementById(id);
 
 let lastUiTrackAt = 0;
@@ -294,6 +299,79 @@ function fieldLabel(field) {
   return labels[safe(field)] || safe(field);
 }
 
+function exportColumnLabel(key) {
+  const labels = {
+    id: 'ID fournisseur',
+    name: 'Nom',
+    address: 'Adresse',
+    city: 'Ville',
+    postal_code: 'Code postal',
+    country: 'Pays',
+    latitude: 'Latitude',
+    longitude: 'Longitude',
+    phone: 'Telephone',
+    email: 'Email',
+    website: 'Site web',
+    facebook_url: 'Facebook',
+    instagram_url: 'Instagram',
+    linkedin_url: 'LinkedIn',
+    supplier_type: 'Type fournisseur',
+    global_activity_text: 'Activites globales',
+    global_labels: 'Labels globaux',
+    profile_activity_text: 'Activites client',
+    profile_labels_text: 'Labels client',
+    profile_notes: 'Notes client',
+    relationship_status: 'Statut relation',
+    supplier_consent_status: 'Statut consentement fournisseur',
+    supplier_consent_requested_at: 'Consentement demande le',
+    supplier_consent_answered_at: 'Consentement repondu le',
+    supplier_consent_source_client_name: 'Consentement porte par',
+    description_short: 'Description courte',
+    description_long: 'Description longue',
+    logo_url: 'Logo URL',
+    photo_cover_url: 'Image couverture URL',
+    slug: 'Slug',
+    updated_at: 'Mis a jour le',
+  };
+  return labels[safe(key)] || safe(key);
+}
+
+function formatExportCellValue(value) {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.join('; ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function triggerFileDownload(fileName, blob) {
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+}
+
+function buildExcelHtmlTable(headers, rows) {
+  const headHtml = headers.map((h) => '<th>' + escapeHtml(h) + '</th>').join('');
+  const bodyHtml = rows.map((row) => {
+    const cols = row.map((value) => '<td>' + escapeHtml(value) + '</td>').join('');
+    return '<tr>' + cols + '</tr>';
+  }).join('');
+
+  return [
+    '<html><head><meta charset="utf-8"></head><body>',
+    '<table border="1"><thead><tr>',
+    headHtml,
+    '</tr></thead><tbody>',
+    bodyHtml,
+    '</tbody></table>',
+    '</body></html>',
+  ].join('');
+}
+
 function resolveContextClientId() {
   const fromState = Number(state.client?.id || 0);
   if (fromState > 0) return fromState;
@@ -390,12 +468,31 @@ function getSupplierConsentState(supplier) {
 
 function getSupplierMissingFields(supplier) {
   const missing = [];
-  if (!safe(supplier?.name)) missing.push('nom');
-  if (!safe(supplier?.address) && !safe(supplier?.city) && !safe(supplier?.postal_code)) missing.push('adresse');
-  if (!safe(supplier?.latitude) || !safe(supplier?.longitude)) missing.push('coordonnées GPS');
-  if (!safe(supplier?.supplier_type)) missing.push('type');
-  if (!parseList(safe(supplier?.global_activity_text) || safe(supplier?.profile_activity_text)).length) missing.push('catégorie / activité');
-  if (!parseList(safe(supplier?.global_labels) || safe(supplier?.profile_labels_text)).length) missing.push('label');
+  const name = safe(supplier?.name);
+  const address = safe(supplier?.address);
+  const city = safe(supplier?.city);
+  const postalCode = safe(supplier?.postal_code);
+  const lat = safe(supplier?.latitude);
+  const lng = safe(supplier?.longitude);
+  const email = safe(supplier?.email);
+  const supplierType = safe(supplier?.supplier_type);
+  const activityValues = parseList(safe(supplier?.global_activity_text) || safe(supplier?.profile_activity_text));
+  const labelValues = parseList(safe(supplier?.global_labels) || safe(supplier?.profile_labels_text));
+
+  if (!name) missing.push('nom');
+
+  const hasAddressInput = !!address || (!!postalCode && !!city);
+  if (!hasAddressInput) missing.push('adresse (ou code postal + ville)');
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  const hasValidGeocoding = Number.isFinite(latNum) && Number.isFinite(lngNum);
+  if (!hasValidGeocoding && !hasAddressInput) missing.push('coordonnées GPS (géocodage)');
+
+  if (!email) missing.push('email');
+  if (!supplierType) missing.push('type');
+  if (!activityValues.length) missing.push('activité');
+  if (!labelValues.length) missing.push('label');
   return missing;
 }
 
@@ -605,13 +702,24 @@ function sanitizePastedHtml(html) {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
 
-  const allowedTags = new Set(['p', 'h2', 'h3', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'a', 'br']);
+  const allowedTags = new Set(['p', 'h2', 'h3', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'a', 'br', 'img']);
 
   function cleanNode(node) {
     if (node.nodeType === Node.TEXT_NODE) return node.cloneNode();
     if (node.nodeType !== Node.ELEMENT_NODE) return null;
 
     const tag = node.tagName.toLowerCase();
+
+    // Normalize headings from pasted web pages into plain paragraphs
+    // to avoid carrying over source typography hierarchy.
+    if (/^h[1-6]$/.test(tag)) {
+      const el = document.createElement('p');
+      Array.from(node.childNodes).forEach((child) => {
+        const cleaned = cleanNode(child);
+        if (cleaned) el.appendChild(cleaned);
+      });
+      return el;
+    }
 
     if (allowedTags.has(tag)) {
       const el = document.createElement(tag);
@@ -622,6 +730,17 @@ function sanitizePastedHtml(html) {
           el.setAttribute('target', '_blank');
           el.setAttribute('rel', 'noopener');
         }
+      } else if (tag === 'img') {
+        const src = node.getAttribute('src') || '';
+        const alt = node.getAttribute('alt') || '';
+        if (!src || !/^(https?:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i.test(src)) {
+          return null;
+        }
+        el.setAttribute('src', src);
+        if (alt) {
+          el.setAttribute('alt', alt.slice(0, 200));
+        }
+        return el;
       }
       Array.from(node.childNodes).forEach((child) => {
         const cleaned = cleanNode(child);
@@ -645,7 +764,12 @@ function sanitizePastedHtml(html) {
     if (cleaned) result.appendChild(cleaned);
   });
 
-  return result.innerHTML.trim() || '<p></p>';
+  const normalized = result.innerHTML
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return normalized || '<p></p>';
 }
 
 function syncLongTextEditorFromTextarea() {
@@ -653,7 +777,7 @@ function syncLongTextEditorFromTextarea() {
   const editor = q('clientInfoDescriptionLongEditor');
   if (!source || !editor) return;
 
-  const html = String(source.value || '').trim();
+  const html = sanitizePastedHtml(String(source.value || ''));
   editor.innerHTML = html || '<p></p>';
 }
 
@@ -690,6 +814,44 @@ function syncLongTextTextareaFromEditor() {
   source.value = String(editor.innerHTML || '').trim();
 }
 
+function syncChangeRequestEditorFromTextarea() {
+  const source = q('changeRequestNewValue');
+  const editor = q('changeRequestLongEditor');
+  if (!source || !editor) return;
+  const html = sanitizePastedHtml(String(source.value || ''));
+  editor.innerHTML = html || '<p></p>';
+}
+
+function syncChangeRequestTextareaFromEditor() {
+  const source = q('changeRequestNewValue');
+  const editor = q('changeRequestLongEditor');
+  if (!source || !editor) return;
+  source.value = String(editor.innerHTML || '').trim();
+}
+
+function insertImageIntoLongEditor(src, alt = '') {
+  const editor = q('clientInfoDescriptionLongEditor');
+  if (!editor || !src) return;
+  editor.focus();
+  const safeSrc = String(src).trim();
+  const safeAlt = escapeHtml(String(alt || '').slice(0, 200));
+  const html = '<p><img src="' + safeSrc.replace(/"/g, '&quot;') + '" alt="' + safeAlt + '"></p>';
+  document.execCommand('insertHTML', false, html);
+  syncLongTextTextareaFromEditor();
+  updateEditorToolbarState();
+}
+
+function insertImageIntoChangeRequestEditor(src, alt = '') {
+  const editor = q('changeRequestLongEditor');
+  if (!editor || !src) return;
+  editor.focus();
+  const safeSrc = String(src).trim();
+  const safeAlt = escapeHtml(String(alt || '').slice(0, 200));
+  const html = '<p><img src="' + safeSrc.replace(/"/g, '&quot;') + '" alt="' + safeAlt + '"></p>';
+  document.execCommand('insertHTML', false, html);
+  syncChangeRequestTextareaFromEditor();
+}
+
 function initOrUpdateClientMap() {
   const latVal = Number(String(q('clientInfoLat').value || '').replace(',', '.'));
   const lngVal = Number(String(q('clientInfoLng').value || '').replace(',', '.'));
@@ -718,6 +880,119 @@ function initOrUpdateClientMap() {
     q('clientInfoLng').value = Number(pos.lng).toFixed(6);
   });
 }
+
+// ── Carte fournisseur (éditeur Bloc A) ──────────────────────────────
+
+function initOrUpdateSupplierMap(supplier) {
+  const box = q('supplierMapBox');
+  if (!box) return;
+
+  const lat = parseFloat(String(supplier?.latitude || '').replace(',', '.'));
+  const lng = parseFloat(String(supplier?.longitude || '').replace(',', '.'));
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+  // Show/hide the map box
+  if (!hasCoords && !safe(supplier?.address) && !safe(supplier?.city)) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+
+  const center = hasCoords ? [lat, lng] : [43.7, -1.05]; // fallback SW France
+  const zoom = hasCoords ? 14 : 8;
+
+  // Initialize map once
+  if (!supplierMapState.map) {
+    supplierMapState.map = L.map('supplierEditorMap');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(supplierMapState.map);
+  }
+
+  supplierMapState.map.setView(center, zoom);
+
+  // Re-create marker each time a new supplier is selected
+  if (supplierMapState.marker) {
+    supplierMapState.marker.remove();
+    supplierMapState.marker = null;
+  }
+
+  if (hasCoords) {
+    supplierMapState.marker = L.marker(center, { draggable: true }).addTo(supplierMapState.map);
+    supplierMapState.marker.on('dragend', () => {
+      showMsg('supplierCoordsMsg', 'Position modifiée — cliquez sur Enregistrer pour sauvegarder.', false);
+    });
+  }
+
+  // Force redraw (needed when panel becomes visible)
+  setTimeout(() => supplierMapState.map.invalidateSize(), 100);
+}
+
+async function onSupplierGeocode() {
+  const s = currentSupplier();
+  if (!s) return;
+
+  const parts = [safe(s.address), safe(s.postal_code), safe(s.city), safe(s.country)].filter(Boolean);
+  if (!parts.length) {
+    showMsg('supplierCoordsMsg', 'Adresse manquante sur la fiche fournisseur.', true);
+    return;
+  }
+  const address = parts.join(', ');
+
+  showMsg('supplierCoordsMsg', 'Géocodage en cours…', false);
+  try {
+    const query = buildClientScopeQuery();
+    const geo = await api('client/geocode', 'POST', { address }, query);
+    if (!geo.found) {
+      showMsg('supplierCoordsMsg', 'Adresse introuvable. Essayez de compléter la fiche.', true);
+      return;
+    }
+    const center = [geo.lat, geo.lng];
+    supplierMapState.map.setView(center, 15);
+    if (supplierMapState.marker) {
+      supplierMapState.marker.setLatLng(center);
+    } else {
+      supplierMapState.marker = L.marker(center, { draggable: true }).addTo(supplierMapState.map);
+      supplierMapState.marker.on('dragend', () => {
+        showMsg('supplierCoordsMsg', 'Position modifiée — cliquez sur Enregistrer pour sauvegarder.', false);
+      });
+    }
+    showMsg('supplierCoordsMsg', `Trouvé : ${geo.display_name || address} — cliquez sur Enregistrer.`, false);
+  } catch (e) {
+    showMsg('supplierCoordsMsg', e.message, true);
+  }
+}
+
+async function onSaveSupplierCoords() {
+  const s = currentSupplier();
+  if (!s || !supplierMapState.marker) {
+    showMsg('supplierCoordsMsg', 'Aucune position à enregistrer.', true);
+    return;
+  }
+
+  const pos = supplierMapState.marker.getLatLng();
+  const query = buildClientScopeQuery();
+  showMsg('supplierCoordsMsg', 'Enregistrement…', false);
+  try {
+    await api('client/supplier/update-coordinates', 'POST', {
+      supplier_id: Number(s.id),
+      latitude: Number(pos.lat).toFixed(6),
+      longitude: Number(pos.lng).toFixed(6),
+      ...query,
+    });
+    // Update local state
+    const idx = state.suppliers.findIndex((sup) => Number(sup.id) === Number(s.id));
+    if (idx !== -1) {
+      state.suppliers[idx].latitude = Number(pos.lat).toFixed(6);
+      state.suppliers[idx].longitude = Number(pos.lng).toFixed(6);
+    }
+    showMsg('supplierCoordsMsg', 'Position enregistrée !', false);
+  } catch (e) {
+    showMsg('supplierCoordsMsg', e.message, true);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
 
 function renderSupplierCreateRequests() {
   const host = q('supplierCreateRequestsList');
@@ -803,19 +1078,33 @@ function renderChangeRequestInput() {
   const field = safe(q('changeRequestField')?.value);
   const supplier = currentSupplier();
   const textEl = q('changeRequestNewValue');
+  const logoWrap = q('changeRequestLogoUploadWrap');
+  const logoPath = q('changeRequestLogoPath');
+  const logoFile = q('changeRequestLogoFile');
+  const longWrap = q('changeRequestLongEditorWrap');
   const typeEl = q('changeRequestSupplierType');
   const activitiesWrap = q('changeRequestActivitiesWrap');
   const activitiesEl = q('changeRequestActivities');
   const labelsWrap = q('changeRequestLabelsWrap');
   const labelsEl = q('changeRequestLabels');
 
-  textEl.classList.toggle('hidden', field === 'supplier_type' || field === 'activity_text' || field === 'labels');
+  const isLongHtml = field === 'description_long';
+  const isLogoField = field === 'logo_url';
+  textEl.classList.toggle('hidden', isLongHtml || isLogoField || field === 'supplier_type' || field === 'activity_text' || field === 'labels');
+  if (logoWrap) {
+    logoWrap.classList.toggle('hidden', !isLogoField);
+  }
+  if (longWrap) {
+    longWrap.classList.toggle('hidden', !isLongHtml);
+  }
   typeEl.classList.toggle('hidden', field !== 'supplier_type');
   activitiesWrap.classList.toggle('hidden', field !== 'activity_text');
   labelsWrap.classList.toggle('hidden', field !== 'labels');
 
   if (!supplier) {
     textEl.value = '';
+    if (logoPath) logoPath.value = '';
+    if (logoFile) logoFile.value = '';
     typeEl.value = '';
     setMultiSelectValues(activitiesEl, []);
     setMultiSelectValues(labelsEl, []);
@@ -855,6 +1144,12 @@ function renderChangeRequestInput() {
     description_long: supplier.description_long,
   };
   textEl.value = safe(valueMap[field]);
+  if (isLogoField && logoPath) {
+    logoPath.value = supplier.logo_url ? 'Logo actuel: ' + safe(supplier.logo_url) : '';
+  }
+  if (isLongHtml) {
+    syncChangeRequestEditorFromTextarea();
+  }
 }
 
 function showMsg(id, text, isError = false) {
@@ -1125,8 +1420,10 @@ function renderEditor() {
   reqSection.classList.remove('hidden');
   showMsg('profileMsg', '');
   showMsg('changeRequestMsg', '');
+  showMsg('supplierCoordsMsg', '');
   renderChangeRequestInput();
   renderChangeRequestsForSelectedSupplier();
+  initOrUpdateSupplierMap(s);
 }
 
 function renderSupplierConsentBox(supplier) {
@@ -1293,6 +1590,9 @@ async function onSendSupplierConsentSingle() {
     if (!supplierId) {
       throw new Error('Sélectionnez un fournisseur');
     }
+    if (!safe(supplier?.email)) {
+      throw new Error('Ce fournisseur n\'a pas d\'email: impossible d\'envoyer la demande de consentement');
+    }
 
     await api('client/supplier-consent/send', 'POST', {
       supplier_id: supplierId,
@@ -1327,10 +1627,13 @@ async function onSendAllSupplierConsents() {
       return;
     }
 
+    const withoutEmail = toSend.filter((supplier) => !safe(supplier?.email));
+    const sendable = toSend.filter((supplier) => !!safe(supplier?.email));
+
     let sent = 0;
     let failed = 0;
 
-    for (const supplier of toSend) {
+    for (const supplier of sendable) {
       try {
         const supplierId = Number(supplier.id);
         await api('client/supplier-consent/send', 'POST', {
@@ -1354,6 +1657,9 @@ async function onSendAllSupplierConsents() {
     let msg = `${sent} demande(s) envoyée(s)`;
     if (failed > 0) {
       msg += ` | ${failed} erreur(s)`;
+    }
+    if (withoutEmail.length > 0) {
+      msg += ` | ${withoutEmail.length} fournisseur(s) sans email`;
     }
     showMsg('supplierConsentOverviewMsg', msg);
   } catch (e) {
@@ -1713,6 +2019,18 @@ async function onSaveChangeRequest() {
       payload.new_value = joinSelectedValues(q('changeRequestActivities'));
     } else if (payload.field_name === 'labels') {
       payload.new_value = joinSelectedValues(q('changeRequestLabels'));
+    } else if (payload.field_name === 'logo_url') {
+      const logoFile = q('changeRequestLogoFile').files?.[0];
+      if (!logoFile) {
+        throw new Error('Veuillez sélectionner une image logo');
+      }
+      const supplier = currentSupplier();
+      const form = new FormData();
+      form.append('logo', logoFile);
+      form.append('supplier_id', String(supplierId));
+      form.append('supplier_name', safe(supplier?.name));
+      const up = await apiForm('client/upload/supplier-logo', form, buildClientScopeQuery());
+      payload.new_value = safe(up.url);
     } else {
       payload.new_value = safe(q('changeRequestNewValue').value);
     }
@@ -1728,6 +2046,8 @@ async function onSaveChangeRequest() {
 
     await api('client/change-request/save', 'POST', payload);
     q('changeRequestNewValue').value = '';
+    q('changeRequestLogoFile').value = '';
+    q('changeRequestLogoPath').value = '';
     q('changeRequestSupplierType').value = '';
     setMultiSelectValues(q('changeRequestActivities'), []);
     setMultiSelectValues(q('changeRequestLabels'), []);
@@ -1735,6 +2055,65 @@ async function onSaveChangeRequest() {
     showMsg('changeRequestMsg', `Demande envoyee a ${formatNowTime()}`);
   } catch (e) {
     showMsg('changeRequestMsg', e.message, true);
+  }
+}
+
+function onExportAllSuppliers() {
+  showMsg('suppliersExportMsg', '');
+  try {
+    if (!Array.isArray(state.suppliers) || state.suppliers.length === 0) {
+      throw new Error('Aucun fournisseur a exporter');
+    }
+
+    const rows = state.suppliers.slice().sort((a, b) => safe(a.name).localeCompare(safe(b.name), 'fr'));
+    const preferredKeys = [
+      'id', 'name', 'address', 'city', 'postal_code', 'country',
+      'latitude', 'longitude', 'phone', 'email', 'website',
+      'supplier_type', 'global_activity_text', 'global_labels',
+      'profile_activity_text', 'profile_labels_text', 'profile_notes',
+      'relationship_status', 'supplier_consent_status', 'supplier_consent_requested_at',
+      'supplier_consent_answered_at', 'supplier_consent_source_client_name',
+    ];
+
+    const dynamicKeys = new Set();
+    rows.forEach((row) => {
+      Object.keys(row || {}).forEach((key) => dynamicKeys.add(key));
+    });
+
+    const orderedKeys = [
+      ...preferredKeys.filter((key) => dynamicKeys.has(key)),
+      ...Array.from(dynamicKeys).filter((key) => !preferredKeys.includes(key)).sort((a, b) => a.localeCompare(b, 'fr')),
+    ];
+
+    const exportRows = rows.map((row) => {
+      const line = {};
+      orderedKeys.forEach((key) => {
+        line[exportColumnLabel(key)] = formatExportCellValue(row[key]);
+      });
+      return line;
+    });
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+    if (window.XLSX && window.XLSX.utils && window.XLSX.writeFile) {
+      const ws = window.XLSX.utils.json_to_sheet(exportRows);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, 'Fournisseurs');
+      const fileName = `fournisseurs-tout-export-${stamp}.xlsx`;
+      window.XLSX.writeFile(wb, fileName);
+      showMsg('suppliersExportMsg', `${rows.length} fournisseur(s) exporte(s) en .xlsx.`);
+      return;
+    }
+
+    // Fallback robuste: fichier Excel compatible (.xls) sans dépendance externe.
+    const headers = orderedKeys.map((key) => exportColumnLabel(key));
+    const matrix = rows.map((row) => orderedKeys.map((key) => formatExportCellValue(row[key])));
+    const htmlTable = buildExcelHtmlTable(headers, matrix);
+    const fileName = `fournisseurs-tout-export-${stamp}.xls`;
+    const blob = new Blob(['\ufeff' + htmlTable], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    triggerFileDownload(fileName, blob);
+    showMsg('suppliersExportMsg', `${rows.length} fournisseur(s) exporte(s) en .xls (mode compatibilité).`);
+  } catch (e) {
+    showMsg('suppliersExportMsg', e.message, true);
   }
 }
 
@@ -1750,10 +2129,13 @@ function bindEvents() {
   q('btnLogout').addEventListener('click', onLogout);
   q('btnClientGeocode').addEventListener('click', onClientGeocode);
   q('btnSaveClientInfo').addEventListener('click', onSaveClientInfo);
+  q('btnSupplierGeocode').addEventListener('click', onSupplierGeocode);
+  q('btnSaveSupplierCoords').addEventListener('click', onSaveSupplierCoords);
   q('btnClientConsentConfirm')?.addEventListener('click', onConfirmClientConsent);
   q('btnClientConsentRevoke')?.addEventListener('click', onRevokeClientConsent);
   q('btnCreateSupplierRequest').addEventListener('click', onCreateSupplierRequest);
   q('btnSearchLinkSupplier').addEventListener('click', onSearchSupplierLinkCandidates);
+  q('btnExportAllSuppliers')?.addEventListener('click', onExportAllSuppliers);
   q('btnGoNewSupplier').addEventListener('click', () => {
     setClientTab('new-supplier');
   });
@@ -1784,6 +2166,11 @@ function bindEvents() {
     q('clientHeaderLogo').innerHTML = `<img src="${blobUrl}" alt="aperçu logo client" />`;
   });
 
+  q('changeRequestLogoFile').addEventListener('change', () => {
+    const f = q('changeRequestLogoFile').files?.[0];
+    q('changeRequestLogoPath').value = f ? f.name : '';
+  });
+
   q('clientInfoGalleryFiles').addEventListener('change', () => {
     renderSelectedGalleryPreview();
   });
@@ -1799,8 +2186,23 @@ function bindEvents() {
   });
 
   q('clientInfoDescriptionLongEditor').addEventListener('paste', (event) => {
-    event.preventDefault();
     const clipData = event.clipboardData || window.clipboardData;
+    const items = clipData && clipData.items ? Array.from(clipData.items) : [];
+    const imageItem = items.find((item) => item.kind === 'file' && /^image\//i.test(item.type || ''));
+    if (imageItem) {
+      event.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        if (dataUrl) insertImageIntoLongEditor(dataUrl, file.name || 'image');
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    event.preventDefault();
     const html = clipData && clipData.getData('text/html');
     const text = clipData && clipData.getData('text/plain');
     let cleanHtml;
@@ -1835,6 +2237,12 @@ function bindEvents() {
       if (url && url.trim() !== '' && url.trim() !== 'https://') {
         document.execCommand('createLink', false, url.trim());
       }
+    } else if (cmd === 'insertImage') {
+      const url = window.prompt('URL de l\'image (https://...)', 'https://');
+      if (url && /^https?:\/\//i.test(url.trim())) {
+        insertImageIntoLongEditor(url.trim());
+        return;
+      }
     } else {
       document.execCommand(cmd, false, arg);
     }
@@ -1845,6 +2253,72 @@ function bindEvents() {
   q('clientInfoDescriptionLongEditor').addEventListener('keyup', updateEditorToolbarState);
   q('clientInfoDescriptionLongEditor').addEventListener('mouseup', updateEditorToolbarState);
   q('clientInfoDescriptionLongEditor').addEventListener('selectionchange', updateEditorToolbarState);
+
+  q('changeRequestLongEditor').addEventListener('input', () => {
+    syncChangeRequestTextareaFromEditor();
+  });
+
+  q('changeRequestLongEditor').addEventListener('paste', (event) => {
+    const clipData = event.clipboardData || window.clipboardData;
+    const items = clipData && clipData.items ? Array.from(clipData.items) : [];
+    const imageItem = items.find((item) => item.kind === 'file' && /^image\//i.test(item.type || ''));
+    if (imageItem) {
+      event.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        if (dataUrl) insertImageIntoChangeRequestEditor(dataUrl, file.name || 'image');
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    event.preventDefault();
+    const html = clipData && clipData.getData('text/html');
+    const text = clipData && clipData.getData('text/plain');
+    let cleanHtml;
+    if (html && html.trim()) {
+      cleanHtml = sanitizePastedHtml(html);
+    } else if (text) {
+      cleanHtml = text
+        .split(/\r?\n\r?\n+/)
+        .map((para) => para.trim())
+        .filter(Boolean)
+        .map((para) => '<p>' + escapeHtml(para).replace(/\r?\n/g, '<br>') + '</p>')
+        .join('');
+    } else {
+      return;
+    }
+    document.execCommand('insertHTML', false, cleanHtml);
+    syncChangeRequestTextareaFromEditor();
+  });
+
+  q('changeRequestLongEditorToolbar').addEventListener('mousedown', (event) => {
+    const btn = event.target.closest('button[data-editor-cmd]');
+    if (!btn) return;
+    event.preventDefault();
+    const cmd = safe(btn.getAttribute('data-editor-cmd'));
+    const arg = btn.getAttribute('data-editor-arg') || null;
+    const editor = q('changeRequestLongEditor');
+    editor.focus();
+    if (cmd === 'createLink') {
+      const url = window.prompt('URL du lien (ex: https://exemple.fr)', 'https://');
+      if (url && url.trim() !== '' && url.trim() !== 'https://') {
+        document.execCommand('createLink', false, url.trim());
+      }
+    } else if (cmd === 'insertImage') {
+      const url = window.prompt('URL de l\'image (https://...)', 'https://');
+      if (url && /^https?:\/\//i.test(url.trim())) {
+        insertImageIntoChangeRequestEditor(url.trim());
+        return;
+      }
+    } else {
+      document.execCommand(cmd, false, arg);
+    }
+    syncChangeRequestTextareaFromEditor();
+  });
 
   q('changeRequestStatusFilter').addEventListener('change', async () => {
     await loadChangeRequests();

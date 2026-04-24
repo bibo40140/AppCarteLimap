@@ -79,6 +79,20 @@ th, td { border-bottom: 1px solid #eceff4; text-align: left; padding: 8px; verti
 .map-modal-backdrop { position: absolute; inset: 0; background: rgba(17, 24, 39, 0.45); }
 .map-modal-card { position: relative; width: min(920px, calc(100vw - 32px)); background: #fff; border-radius: 12px; border: 1px solid #d1d5db; padding: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
 .map-canvas { margin-top: 8px; width: 100%; height: min(62vh, 560px); border: 1px solid #d1d5db; border-radius: 8px; }
+/* Audit detail modal */
+.audit-modal-card { position: relative; width: min(600px, calc(100vw - 32px)); background: #fff; border-radius: 12px; border: 1px solid #d1d5db; padding: 20px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+.audit-modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.audit-modal-date { font-size: 12px; color: #6b7280; font-family: monospace; }
+.audit-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #6b7280; padding: 0 4px; }
+.audit-modal-close:hover { color: #111; }
+.audit-modal-message { font-size: 15px; color: #111827; margin: 0 0 12px; line-height: 1.6; }
+.audit-modal-message strong { color: #1d4ed8; }
+.audit-modal-extra { font-size: 13px; color: #374151; }
+.audit-modal-extra table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.audit-modal-extra td { padding: 4px 8px; border: 1px solid #e5e7eb; vertical-align: top; }
+.audit-modal-extra td:first-child { font-weight: 600; color: #6b7280; white-space: nowrap; width: 130px; }
+.audit-row-clickable { cursor: pointer; }
+.audit-row-clickable:hover { background: #f0f7ff !important; }
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
