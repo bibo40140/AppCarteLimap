@@ -60,6 +60,8 @@ function confirm_client_consent(PDO $pdo): void
             'details' => ['consent_text_version' => $textVersion],
         ]);
 
+        notify_consent_approval_emails_for_client($pdo, $clientId, $textVersion);
+
         if (function_exists('sync_client_to_wordpress')) {
             sync_client_to_wordpress($pdo, $clientId);
         }
@@ -400,6 +402,8 @@ function approve_supplier_consent_from_token(PDO $pdo): void
             'details' => ['source_client_id' => $request['source_client_id']],
         ]);
 
+        notify_consent_approval_emails_for_supplier($pdo, $request);
+
         if (function_exists('sync_supplier_to_wordpress')) {
             sync_supplier_to_wordpress($pdo, (int)$request['supplier_id']);
         }
@@ -722,6 +726,93 @@ function send_supplier_consent_email(PDO $pdo, string $email, string $clientName
 
     $error = 'Echec envoi via mail() (SMTP non configure ou refuse)';
     return false;
+}
+
+/**
+ * Notify fixed recipients when a client approves consent.
+ */
+function notify_consent_approval_emails_for_client(PDO $pdo, int $clientId, string $textVersion): void
+{
+    $to = consent_approval_notification_recipients();
+    if (!$to || !function_exists('send_plain_email')) {
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT name FROM clients WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $clientId]);
+        $clientName = (string)($stmt->fetchColumn() ?: ('Client #' . $clientId));
+
+        $subject = '[LIMAP] Nouveau consentement client valide';
+        $body = "Un nouveau client a valide son consentement.\n\n"
+            . "Client: {$clientName}\n"
+            . "Client ID: {$clientId}\n"
+            . "Version texte: {$textVersion}\n"
+            . "Date: " . date('Y-m-d H:i:s') . "\n"
+            . "Source: " . get_app_base_url($pdo) . "\n";
+
+        if (!send_plain_email($to, $subject, $body)) {
+            error_log('LIMAP: echec notification consentement client #' . $clientId);
+        }
+    } catch (Throwable $e) {
+        error_log('LIMAP: exception notification consentement client: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Notify fixed recipients when a supplier approves consent.
+ */
+function notify_consent_approval_emails_for_supplier(PDO $pdo, array $request): void
+{
+    $to = consent_approval_notification_recipients();
+    if (!$to || !function_exists('send_plain_email')) {
+        return;
+    }
+
+    try {
+        $supplierId = (int)($request['supplier_id'] ?? 0);
+        $sourceClientId = (int)($request['source_client_id'] ?? 0);
+
+        $supplierName = 'Producteur #' . $supplierId;
+        if ($supplierId > 0) {
+            $supplierStmt = $pdo->prepare('SELECT name FROM suppliers WHERE id = :id LIMIT 1');
+            $supplierStmt->execute([':id' => $supplierId]);
+            $supplierName = (string)($supplierStmt->fetchColumn() ?: $supplierName);
+        }
+
+        $clientName = 'Client #' . $sourceClientId;
+        if ($sourceClientId > 0) {
+            $clientStmt = $pdo->prepare('SELECT name FROM clients WHERE id = :id LIMIT 1');
+            $clientStmt->execute([':id' => $sourceClientId]);
+            $clientName = (string)($clientStmt->fetchColumn() ?: $clientName);
+        }
+
+        $subject = '[LIMAP] Nouveau consentement producteur valide';
+        $body = "Un nouveau producteur a valide son consentement.\n\n"
+            . "Producteur: {$supplierName}\n"
+            . "Producteur ID: {$supplierId}\n"
+            . "Client source: {$clientName}\n"
+            . "Client source ID: {$sourceClientId}\n"
+            . "Date: " . date('Y-m-d H:i:s') . "\n"
+            . "Source: " . get_app_base_url($pdo) . "\n";
+
+        if (!send_plain_email($to, $subject, $body)) {
+            error_log('LIMAP: echec notification consentement producteur #' . $supplierId);
+        }
+    } catch (Throwable $e) {
+        error_log('LIMAP: exception notification consentement producteur: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Fixed recipients requested for consent approval notifications.
+ */
+function consent_approval_notification_recipients(): array
+{
+    return [
+        'contact@limap.fr',
+        'fabien.hicauber@gmail.com',
+    ];
 }
 
 /**

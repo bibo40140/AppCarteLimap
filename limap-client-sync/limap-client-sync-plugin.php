@@ -568,7 +568,7 @@ function limap_sync_render_client_content(array $client): string
     $phone = esc_html($f('phone'));
     $email = esc_html($f('email'));
     $website = esc_url($f('website'));
-    $logo = esc_url($f('logo_url'));
+    $logo = esc_url(limap_sync_normalize_media_url($f('logo_url')));
     $facebook = esc_url($f('facebook_url') !== '' ? $f('facebook_url') : $f('facebook'));
     $instagram = esc_url($f('instagram_url') !== '' ? $f('instagram_url') : $f('instagram'));
     $linkedin = esc_url($f('linkedin_url') !== '' ? $f('linkedin_url') : $f('linkedin'));
@@ -611,7 +611,7 @@ function limap_sync_render_client_content(array $client): string
             <h2>Galerie</h2>
             <div class="limap-gallery-grid">
               <?php foreach ($gallery as $image): ?>
-                <?php $imgUrl = esc_url($image['url'] ?? ''); ?>
+                <?php $imgUrl = esc_url(limap_sync_normalize_media_url((string)($image['url'] ?? ''))); ?>
                 <?php if ($imgUrl !== ''): ?>
                   <div class="limap-gallery-item">
                     <img src="<?php echo $imgUrl; ?>" alt="<?php echo $title; ?>" loading="lazy" />
@@ -789,6 +789,44 @@ function limap_sync_render_client_content(array $client): string
     return trim($value);
   }
 
+  function limap_sync_normalize_media_url(string $url): string
+  {
+    $url = trim($url);
+    if ($url === '' || !preg_match('/^https?:\/\//i', $url)) {
+      return $url;
+    }
+
+    $path = (string)parse_url($url, PHP_URL_PATH);
+    if ($path === '') {
+      return $url;
+    }
+
+    $normalizedPath = preg_replace('#^/([^/]+)/\\1/(?=(assets|uploads)/)#i', '/$1/', $path);
+    if (!is_string($normalizedPath) || $normalizedPath === $path) {
+      return $url;
+    }
+
+    $parts = parse_url($url);
+    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+      return $url;
+    }
+
+    $auth = '';
+    if (!empty($parts['user'])) {
+      $auth = (string)$parts['user'];
+      if (!empty($parts['pass'])) {
+        $auth .= ':' . (string)$parts['pass'];
+      }
+      $auth .= '@';
+    }
+
+    $port = !empty($parts['port']) ? ':' . (int)$parts['port'] : '';
+    $query = array_key_exists('query', $parts) ? '?' . (string)$parts['query'] : '';
+    $fragment = array_key_exists('fragment', $parts) ? '#' . (string)$parts['fragment'] : '';
+
+    return (string)$parts['scheme'] . '://' . $auth . (string)$parts['host'] . $port . $normalizedPath . $query . $fragment;
+  }
+
   function limap_sync_delete_supplier_post(int $idSource, array $supplier = []): bool
   {
     $postId = limap_sync_find_supplier_post_id($idSource);
@@ -859,7 +897,7 @@ function limap_sync_render_client_content(array $client): string
 
     $imageUrl = '';
     foreach ([$primaryUrl, $fallbackUrl] as $candidate) {
-      $candidate = trim($candidate);
+      $candidate = limap_sync_normalize_media_url((string)$candidate);
       if ($candidate !== '' && preg_match('/^https?:\/\//i', $candidate)) {
         $imageUrl = $candidate;
         break;
@@ -937,12 +975,13 @@ function limap_sync_render_client_content(array $client): string
     $phone = esc_html($f('phone'));
     $email = esc_html($f('email'));
     $website = esc_url($f('website'));
-    $logo = esc_url($f('logo_url'));
+    $logo = esc_url(limap_sync_normalize_media_url($f('logo_url')));
     $facebook = esc_url($f('facebook_url') !== '' ? $f('facebook_url') : $f('facebook'));
     $instagram = esc_url($f('instagram_url') !== '' ? $f('instagram_url') : $f('instagram'));
     $linkedin = esc_url($f('linkedin_url') !== '' ? $f('linkedin_url') : $f('linkedin'));
     $activityIconsStr = $f('activity_icons');
     $activityIcons = $activityIconsStr !== '' ? array_values(array_filter(preg_split('/\s*;\s*/', $activityIconsStr) ?: [])) : [];
+    $activityIcons = array_values(array_filter(array_map('limap_sync_normalize_media_url', $activityIcons), static fn($v) => $v !== ''));
 
     ob_start();
     ?>

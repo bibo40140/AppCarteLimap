@@ -2776,9 +2776,7 @@ function upload_supplier_logo(): void
         json_response(['ok' => false, 'error' => 'Impossible de déplacer le fichier uploadé'], 500);
     }
 
-    $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/api')), '/');
-    $baseWebPath = preg_replace('#/api$#', '', $scriptDir);
-    $url = ($baseWebPath ?: '') . '/assets/fournisseur-logos/' . $filename;
+    $url = '/assets/fournisseur-logos/' . $filename;
 
     json_response(['ok' => true, 'url' => $url, 'standardized' => $standardized]);
 }
@@ -3595,14 +3593,40 @@ function get_public_assets_base_url(PDO $pdo): string
 function absolutize_export_url(PDO $pdo, string $url): string
 {
     $url = trim($url);
-    if ($url === '' || preg_match('/^https?:\/\//i', $url)) {
+    if ($url === '') {
+        return $url;
+    }
+
+    $base = get_public_assets_base_url($pdo);
+    if (preg_match('/^https?:\/\//i', $url)) {
+        if ($base !== '') {
+            $basePath = (string)parse_url($base, PHP_URL_PATH);
+            $basePath = rtrim($basePath, '/');
+            if ($basePath !== '' && $basePath !== '/') {
+                $normalizedBase = rtrim($base, '/');
+                $dupPrefix = $normalizedBase . $basePath . '/';
+                if (strpos($url, $dupPrefix) === 0) {
+                    $url = $normalizedBase . '/' . substr($url, strlen($dupPrefix));
+                }
+            }
+        }
         return $url;
     }
     if (strpos($url, '/') !== 0) {
         return $url;
     }
 
-    $base = get_public_assets_base_url($pdo);
+    if ($base !== '') {
+        $basePath = (string)parse_url($base, PHP_URL_PATH);
+        $basePath = rtrim($basePath, '/');
+        if ($basePath !== '' && $basePath !== '/' && strpos($url, $basePath . '/') === 0) {
+            // Avoid duplicated subfolder prefixes like /Carte/Carte/... when base already contains /Carte.
+            $url = substr($url, strlen($basePath));
+            if ($url === '' || $url[0] !== '/') {
+                $url = '/' . ltrim($url, '/');
+            }
+        }
+    }
     return $base === '' ? $url : $base . $url;
 }
 
