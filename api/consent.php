@@ -466,6 +466,234 @@ function reject_supplier_consent_from_token(PDO $pdo): void
     }
 }
 
+function send_partner_consent_request_for_admin(PDO $pdo): void
+{
+    $input = get_json_input();
+    $partnerId = isset($input['partner_id']) ? (int)$input['partner_id'] : 0;
+
+    if ($partnerId <= 0) {
+        json_response(['ok' => false, 'error' => 'Partenaire invalide'], 422);
+    }
+
+    $partnerStmt = $pdo->prepare('SELECT id, name, email FROM partners WHERE id = :id AND is_active = 1 LIMIT 1');
+    $partnerStmt->execute([':id' => $partnerId]);
+    $partner = $partnerStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$partner) {
+        json_response(['ok' => false, 'error' => 'Partenaire introuvable'], 404);
+    }
+    if (empty($partner['email'])) {
+        json_response(['ok' => false, 'error' => 'Email partenaire manquant'], 422);
+    }
+
+    $alreadyApproved = $pdo->prepare(
+        'SELECT COUNT(*) as cnt FROM partner_consents
+         WHERE partner_id = :partner_id AND status = "approved" AND revoked_at IS NULL'
+    );
+    $alreadyApproved->execute([':partner_id' => $partnerId]);
+    $result = $alreadyApproved->fetch(PDO::FETCH_ASSOC);
+    if (($result['cnt'] ?? 0) > 0) {
+        json_response(['ok' => true, 'message' => 'Ce partenaire a déjà validé son consentement']);
+    }
+
+    $tokenRaw = bin2hex(random_bytes(32));
+    $tokenHash = hash('sha256', $tokenRaw);
+    $textVersion = '2026-04-v1';
+    $consentText = get_consent_text_snapshot('partner_consent', $textVersion);
+    if ($consentText === null) {
+        json_response(['ok' => false, 'error' => 'Texte de consentement manquant'], 422);
+    }
+
+    $textHash = hash('sha256', $consentText);
+    $expiresAt = date('Y-m-d H:i:s', time() + 14 * 24 * 3600);
+
+    try {
+        $pdo->prepare(
+            'INSERT INTO partner_consent_requests (partner_id, recipient_email, request_token_hash, status, consent_text_version, consent_text_snapshot, consent_text_hash, requested_at, expires_at)
+             VALUES (:partner_id, :recipient_email, :request_token_hash, "sent", :consent_text_version, :consent_text_snapshot, :consent_text_hash, NOW(), :expires_at)'
+        )->execute([
+            ':partner_id' => $partnerId,
+            ':recipient_email' => $partner['email'],
+            ':request_token_hash' => $tokenHash,
+            ':consent_text_version' => $textVersion,
+            ':consent_text_snapshot' => $consentText,
+            ':consent_text_hash' => $textHash,
+            ':expires_at' => $expiresAt,
+        ]);
+
+        $requestId = (int)$pdo->lastInsertId();
+        $consentLink = get_partner_consent_page_url($pdo, $tokenRaw);
+        $emailError = null;
+        if (!send_partner_consent_email($pdo, (string)$partner['email'], (string)$partner['name'], $consentLink, $emailError)) {
+            $pdo->prepare('UPDATE partner_consent_requests SET status = "error" WHERE id = :id')
+                ->execute([':id' => $requestId]);
+            throw new RuntimeException('Echec envoi email: ' . ($emailError ?? 'raison inconnue'));
+        }
+
+        write_admin_audit($pdo, 'partner_consent_request_sent', [
+            'target_type' => 'partner',
+            'target_id' => $partnerId,
+            'details' => ['email' => $partner['email']],
+        ]);
+
+        json_response(['ok' => true, 'message' => 'Email envoyé au partenaire']);
+    } catch (Exception $e) {
+        json_response(['ok' => false, 'error' => 'Erreur lors de l\'envoi: ' . $e->getMessage()], 500);
+    }
+}
+
+function view_partner_consent_from_token(PDO $pdo): void
+{
+    $tokenRaw = trim((string)($_GET['token'] ?? ''));
+    if ($tokenRaw === '') {
+        json_response(['ok' => false, 'error' => 'Token manquant'], 422);
+    }
+
+    $tokenHash = hash('sha256', $tokenRaw);
+    $stmt = $pdo->prepare(
+        'SELECT pcr.*, p.name AS partner_name, p.email AS partner_email
+         FROM partner_consent_requests pcr
+         JOIN partners p ON p.id = pcr.partner_id
+         WHERE pcr.request_token_hash = :token_hash AND pcr.expires_at > NOW()'
+    );
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Lien expiré ou invalide'], 404);
+    }
+
+    if (!$request['opened_at']) {
+        $pdo->prepare('UPDATE partner_consent_requests SET status = "opened", opened_at = NOW(), answer_ip = :ip, answer_user_agent = :ua WHERE id = :id AND status = "sent"')
+            ->execute([
+                ':id' => $request['id'],
+                ':ip' => get_client_ip(),
+                ':ua' => mb_substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+            ]);
+    }
+
+    json_response([
+        'ok' => true,
+        'request' => [
+            'id' => $request['id'],
+            'token' => $tokenRaw,
+            'partner_name' => $request['partner_name'],
+            'partner_email' => $request['partner_email'],
+            'consent_text' => $request['consent_text_snapshot'],
+            'expires_at' => $request['expires_at'],
+        ],
+    ]);
+}
+
+function approve_partner_consent_from_token(PDO $pdo): void
+{
+    $input = get_json_input();
+    $tokenRaw = trim((string)($input['token'] ?? ''));
+    if ($tokenRaw === '') {
+        json_response(['ok' => false, 'error' => 'Token manquant'], 422);
+    }
+
+    $tokenHash = hash('sha256', $tokenRaw);
+    $stmt = $pdo->prepare(
+        'SELECT * FROM partner_consent_requests
+         WHERE request_token_hash = :token_hash AND expires_at > NOW() AND status IN ("sent", "opened")'
+    );
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Lien expiré ou invalide'], 404);
+    }
+
+    try {
+        $pdo->prepare('UPDATE partner_consent_requests SET status = "approved", answered_at = NOW(), answer_ip = :ip, answer_user_agent = :ua WHERE id = :id')
+            ->execute([
+                ':id' => $request['id'],
+                ':ip' => get_client_ip(),
+                ':ua' => mb_substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+            ]);
+
+        $existingStmt = $pdo->prepare('SELECT id FROM partner_consents WHERE partner_id = :partner_id AND status = "approved" AND revoked_at IS NULL LIMIT 1');
+        $existingStmt->execute([':partner_id' => $request['partner_id']]);
+        $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$existing) {
+            $pdo->prepare(
+                'INSERT INTO partner_consents (partner_id, approved_from_request_id, status, consent_text_version, consent_text_snapshot, consent_text_hash, approved_at, approved_ip, approved_user_agent)
+                 VALUES (:partner_id, :approved_from_request_id, "approved", :consent_text_version, :consent_text_snapshot, :consent_text_hash, NOW(), :approved_ip, :approved_user_agent)'
+            )->execute([
+                ':partner_id' => $request['partner_id'],
+                ':approved_from_request_id' => $request['id'],
+                ':consent_text_version' => $request['consent_text_version'],
+                ':consent_text_snapshot' => $request['consent_text_snapshot'],
+                ':consent_text_hash' => $request['consent_text_hash'],
+                ':approved_ip' => get_client_ip(),
+                ':approved_user_agent' => mb_substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+            ]);
+        }
+
+        write_admin_audit($pdo, 'partner_consent_approved', [
+            'target_type' => 'partner',
+            'target_id' => $request['partner_id'],
+            'details' => [],
+        ]);
+
+        notify_consent_approval_emails_for_partner($pdo, $request);
+
+        if (function_exists('sync_partner_to_wordpress')) {
+            sync_partner_to_wordpress($pdo, (int)$request['partner_id']);
+        }
+
+        json_response(['ok' => true, 'message' => 'Merci pour votre accord']);
+    } catch (Exception $e) {
+        json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
+function reject_partner_consent_from_token(PDO $pdo): void
+{
+    $input = get_json_input();
+    $tokenRaw = trim((string)($input['token'] ?? ''));
+    if ($tokenRaw === '') {
+        json_response(['ok' => false, 'error' => 'Token manquant'], 422);
+    }
+
+    $tokenHash = hash('sha256', $tokenRaw);
+    $stmt = $pdo->prepare(
+        'SELECT id, partner_id FROM partner_consent_requests
+         WHERE request_token_hash = :token_hash AND expires_at > NOW() AND status IN ("sent", "opened")'
+    );
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Lien expiré ou invalide'], 404);
+    }
+
+    try {
+        $pdo->prepare('UPDATE partner_consent_requests SET status = "rejected", answered_at = NOW(), answer_ip = :ip, answer_user_agent = :ua WHERE id = :id')
+            ->execute([
+                ':id' => $request['id'],
+                ':ip' => get_client_ip(),
+                ':ua' => mb_substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+            ]);
+
+        write_admin_audit($pdo, 'partner_consent_rejected', [
+            'target_type' => 'partner',
+            'target_id' => $request['partner_id'],
+            'details' => [],
+        ]);
+
+        if (function_exists('sync_partner_to_wordpress')) {
+            sync_partner_to_wordpress($pdo, (int)$request['partner_id']);
+        }
+
+        json_response(['ok' => true, 'message' => 'Refus enregistré']);
+    } catch (Exception $e) {
+        json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
 /**
  * Admin Overview : Get all consent status
  * GET /admin/consent-overview
@@ -650,6 +878,98 @@ function revoke_supplier_consent_for_admin(PDO $pdo): void
     }
 }
 
+function resend_partner_consent_for_admin(PDO $pdo): void
+{
+    $input = get_json_input();
+    $requestId = isset($input['request_id']) ? (int)$input['request_id'] : 0;
+
+    if ($requestId <= 0) {
+        json_response(['ok' => false, 'error' => 'Demande invalide'], 422);
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT pcr.*, p.name AS partner_name FROM partner_consent_requests pcr
+         JOIN partners p ON p.id = pcr.partner_id
+         WHERE pcr.id = :id'
+    );
+    $stmt->execute([':id' => $requestId]);
+    $request = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$request) {
+        json_response(['ok' => false, 'error' => 'Demande non trouvée'], 404);
+    }
+
+    $newTokenRaw = bin2hex(random_bytes(32));
+    $newTokenHash = hash('sha256', $newTokenRaw);
+    $expiresAt = date('Y-m-d H:i:s', time() + 14 * 24 * 3600);
+
+    try {
+        $pdo->prepare(
+            'UPDATE partner_consent_requests SET request_token_hash = :new_token_hash, status = "sent", expires_at = :expires_at, opened_at = NULL, answered_at = NULL WHERE id = :id'
+        )->execute([
+            ':id' => $requestId,
+            ':new_token_hash' => $newTokenHash,
+            ':expires_at' => $expiresAt,
+        ]);
+
+        $consentLink = get_partner_consent_page_url($pdo, $newTokenRaw);
+        $emailError = null;
+        if (!send_partner_consent_email($pdo, (string)$request['recipient_email'], (string)$request['partner_name'], $consentLink, $emailError)) {
+            $pdo->prepare('UPDATE partner_consent_requests SET status = "error" WHERE id = :id')
+                ->execute([':id' => $requestId]);
+            throw new RuntimeException('Echec renvoi email: ' . ($emailError ?? 'raison inconnue'));
+        }
+
+        write_admin_audit($pdo, 'partner_consent_request_resent', [
+            'target_type' => 'partner_consent_request',
+            'target_id' => $requestId,
+            'details' => [],
+        ]);
+
+        json_response(['ok' => true, 'message' => 'Email renvoyé']);
+    } catch (Exception $e) {
+        json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
+function revoke_partner_consent_for_admin(PDO $pdo): void
+{
+    $input = get_json_input();
+    $partnerId = isset($input['partner_id']) ? (int)$input['partner_id'] : 0;
+    $reason = trim((string)($input['reason'] ?? ''));
+
+    if ($partnerId <= 0) {
+        json_response(['ok' => false, 'error' => 'Partenaire invalide'], 422);
+    }
+
+    $adminId = !empty($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : null;
+
+    try {
+        $pdo->prepare(
+            'UPDATE partner_consents SET revoked_at = NOW(), revoked_by_type = "admin", revoked_by_id = :revoked_by_id, revoke_reason = :revoke_reason
+             WHERE partner_id = :partner_id AND status = "approved" AND revoked_at IS NULL'
+        )->execute([
+            ':partner_id' => $partnerId,
+            ':revoked_by_id' => $adminId,
+            ':revoke_reason' => $reason !== '' ? $reason : null,
+        ]);
+
+        write_admin_audit($pdo, 'partner_consent_revoked_by_admin', [
+            'target_type' => 'partner',
+            'target_id' => $partnerId,
+            'details' => ['reason' => $reason],
+        ]);
+
+        if (function_exists('sync_partner_to_wordpress')) {
+            sync_partner_to_wordpress($pdo, $partnerId);
+        }
+
+        json_response(['ok' => true, 'message' => 'Consentement partenaire révoqué']);
+    } catch (Exception $e) {
+        json_response(['ok' => false, 'error' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -692,6 +1012,20 @@ Date: April 3, 2026
 TEXT;
     }
 
+    if ($textKey === 'partner_consent' && $version === '2026-04-v1') {
+        return <<<'TEXT'
+# Consentement Partenaire LIMAP
+
+En acceptant, vous autorisez votre fiche partenaire à être visible publiquement sur la carte LIMAP et sur les supports synchronisés.
+
+Vous pourrez demander le retrait de cette publication à tout moment.
+
+---
+Version: 2026-04-v1
+Date: April 3, 2026
+TEXT;
+    }
+
     return null;
 }
 
@@ -714,6 +1048,36 @@ function send_supplier_consent_email(PDO $pdo, string $email, string $clientName
         . "Si vous n'etes pas concerne, ignorez simplement cet email.\n\n"
         . "L'equipe en charge du site internet\n"
         . "LIMAP";
+
+    $smtp = get_notification_mail_config($pdo);
+    if (trim((string)($smtp['host'] ?? '')) !== '') {
+        return smtp_send_plain_email($smtp, [$email], $subject, $body, $error);
+    }
+
+    if (send_plain_email([$email], $subject, $body)) {
+        return true;
+    }
+
+    $error = 'Echec envoi via mail() (SMTP non configure ou refuse)';
+    return false;
+}
+
+function send_partner_consent_email(PDO $pdo, string $email, string $partnerName, string $consentLink, ?string &$error = null): bool
+{
+    $error = null;
+    if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        $error = 'Email destinataire invalide';
+        return false;
+    }
+
+    $subject = '[LIMAP] Demande de consentement partenaire';
+    $body = "Bonjour,\n\n"
+        . 'Votre structure "' . $partnerName . '" est proposee pour affichage public sur la carte et le site LIMAP.\n\n'
+        . "Cliquez sur ce lien pour repondre :\n{$consentLink}\n\n"
+        . "Ce lien est valable 14 jours.\n\n"
+        . "Si vous n'etes pas concerne, ignorez simplement cet email.\n\n"
+        . "L'equipe en charge du site internet\n"
+        . 'LIMAP';
 
     $smtp = get_notification_mail_config($pdo);
     if (trim((string)($smtp['host'] ?? '')) !== '') {
@@ -804,6 +1168,38 @@ function notify_consent_approval_emails_for_supplier(PDO $pdo, array $request): 
     }
 }
 
+function notify_consent_approval_emails_for_partner(PDO $pdo, array $request): void
+{
+    $to = consent_approval_notification_recipients($pdo);
+    if (!$to || !function_exists('send_plain_email')) {
+        return;
+    }
+
+    try {
+        $partnerId = (int)($request['partner_id'] ?? 0);
+
+        $partnerName = 'Partenaire #' . $partnerId;
+        if ($partnerId > 0) {
+            $partnerStmt = $pdo->prepare('SELECT name FROM partners WHERE id = :id LIMIT 1');
+            $partnerStmt->execute([':id' => $partnerId]);
+            $partnerName = (string)($partnerStmt->fetchColumn() ?: $partnerName);
+        }
+
+        $subject = '[LIMAP] Nouveau consentement partenaire valide';
+        $body = "Un nouveau partenaire a valide son consentement.\n\n"
+            . "Partenaire: {$partnerName}\n"
+            . "Partenaire ID: {$partnerId}\n"
+            . 'Date: ' . date('Y-m-d H:i:s') . "\n"
+            . 'Source: ' . get_app_base_url($pdo) . "\n";
+
+        if (!send_plain_email($to, $subject, $body)) {
+            error_log('LIMAP: echec notification consentement partenaire #' . $partnerId);
+        }
+    } catch (Throwable $e) {
+        error_log('LIMAP: exception notification consentement partenaire: ' . $e->getMessage());
+    }
+}
+
 /**
  * Fixed recipients requested for consent approval notifications.
  * Uses admin notification emails configured in settings (or config.php fallback).
@@ -835,6 +1231,165 @@ function get_app_base_url(PDO $pdo): string
     $basePath = is_string($basePath) ? rtrim($basePath, '/') : '';
 
     return $scheme . '://' . $host . $basePath;
+}
+
+function get_partner_consent_page_url(PDO $pdo, string $tokenRaw): string
+{
+        $base = rtrim(get_app_base_url($pdo), '/');
+        return $base . '/api/index.php?action=partner%2Fconsent%2Fpage&token=' . rawurlencode($tokenRaw);
+}
+
+function render_partner_consent_page(PDO $pdo): void
+{
+        $token = trim((string)($_GET['token'] ?? ''));
+        header('Content-Type: text/html; charset=UTF-8');
+        ?>
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Consentement partenaire - LIMAP</title>
+    <style>
+        :root { --bg:#f3efe7; --card:#fffdf8; --line:#dfd5c4; --ink:#2b2318; --muted:#6f6658; --ok:#236744; --ok-bg:#e5f3ea; --danger:#9f2f2f; --danger-bg:#fae7e7; --primary:#2e5f87; --primary-dark:#214a6a; }
+        * { box-sizing: border-box; }
+        body { margin:0; font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif; color:var(--ink); background: radial-gradient(1200px 500px at 20% -10%, #f8edd6 0%, transparent 60%), radial-gradient(900px 450px at 110% 110%, #e4f1fb 0%, transparent 65%), var(--bg); min-height:100vh; display:grid; place-items:center; padding:20px; }
+        .card { width:min(760px,100%); background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 20px 40px rgba(43,35,24,.08); }
+        h1 { margin:0 0 8px; font-size:1.5rem; }
+        .muted { color:var(--muted); }
+        .hidden { display:none !important; }
+        .meta { margin:14px 0; padding:12px; border-radius:12px; border:1px solid var(--line); background:#fbf8f2; display:grid; gap:6px; }
+        .consent-text { margin-top:14px; border:1px solid var(--line); border-radius:12px; background:#fff; padding:14px; line-height:1.45; white-space:pre-wrap; max-height:340px; overflow:auto; }
+        .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+        button { border:1px solid transparent; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
+        button.primary { background:var(--primary); color:#fff; }
+        button.primary:hover { background:var(--primary-dark); }
+        button.secondary { background:#f4efe5; border-color:var(--line); color:var(--ink); }
+        .banner { margin-top:14px; border-radius:10px; padding:10px 12px; border:1px solid var(--line); background:#f8f3e7; color:var(--ink); }
+        .banner.ok { background:var(--ok-bg); border-color:#a8d1b7; color:var(--ok); }
+        .banner.error { background:var(--danger-bg); border-color:#e2a8a8; color:var(--danger); }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>Validation du consentement partenaire</h1>
+        <p class="muted">Cette page vous permet de confirmer ou refuser l'affichage public de votre fiche partenaire sur la carte LIMAP.</p>
+
+        <div id="loading" class="banner">Chargement de la demande...</div>
+
+        <section id="content" class="hidden">
+            <div class="meta">
+                <div><strong>Partenaire:</strong> <span id="partnerName"></span></div>
+                <div><strong>Email:</strong> <span id="partnerEmail"></span></div>
+                <div><strong>Expiration du lien:</strong> <span id="expiresAt"></span></div>
+            </div>
+
+            <div id="consentText" class="consent-text"></div>
+
+            <div class="actions">
+                <button id="btnApprove" class="primary" type="button">J'accepte</button>
+                <button id="btnReject" class="secondary" type="button">Je refuse</button>
+            </div>
+        </section>
+
+        <div id="message" class="banner hidden"></div>
+    </main>
+
+    <script>
+        (function () {
+            const token = <?php echo json_encode($token, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?> || '';
+            const loadingEl = document.getElementById('loading');
+            const contentEl = document.getElementById('content');
+            const messageEl = document.getElementById('message');
+            const approveBtn = document.getElementById('btnApprove');
+            const rejectBtn = document.getElementById('btnReject');
+            const apiBase = 'index.php?action=';
+
+            function setMessage(text, kind) {
+                messageEl.textContent = text;
+                messageEl.classList.remove('hidden', 'ok', 'error');
+                if (kind === 'ok') messageEl.classList.add('ok');
+                if (kind === 'error') messageEl.classList.add('error');
+            }
+
+            function setBusy(busy) {
+                approveBtn.disabled = busy;
+                rejectBtn.disabled = busy;
+            }
+
+            async function api(action, method, body) {
+                const res = await fetch(apiBase + encodeURIComponent(action), {
+                    method: method,
+                    credentials: 'omit',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body ? JSON.stringify(body) : undefined,
+                });
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok || payload.ok === false) {
+                    throw new Error(payload.error || ('HTTP ' + res.status));
+                }
+                return payload;
+            }
+
+            async function loadRequest() {
+                if (!token) {
+                    loadingEl.classList.add('hidden');
+                    setMessage('Lien invalide: token manquant.', 'error');
+                    return;
+                }
+
+                try {
+                    const res = await fetch(apiBase + encodeURIComponent('partner/consent/view') + '&token=' + encodeURIComponent(token), {
+                        method: 'GET',
+                        credentials: 'omit',
+                    });
+                    const payload = await res.json().catch(() => ({}));
+                    if (!res.ok || payload.ok === false) {
+                        throw new Error(payload.error || ('HTTP ' + res.status));
+                    }
+                    const req = payload.request || {};
+                    document.getElementById('partnerName').textContent = req.partner_name || '';
+                    document.getElementById('partnerEmail').textContent = req.partner_email || '';
+                    document.getElementById('expiresAt').textContent = req.expires_at || '';
+                    document.getElementById('consentText').textContent = req.consent_text || '';
+
+                    loadingEl.classList.add('hidden');
+                    contentEl.classList.remove('hidden');
+                } catch (err) {
+                    loadingEl.classList.add('hidden');
+                    setMessage(err.message || 'Erreur de chargement du lien.', 'error');
+                }
+            }
+
+            async function submitDecision(action, successText) {
+                setMessage('', null);
+                setBusy(true);
+                try {
+                    const payload = await api(action, 'POST', { token: token });
+                    contentEl.classList.add('hidden');
+                    setMessage(payload.message || successText, 'ok');
+                } catch (err) {
+                    setMessage(err.message || 'Erreur lors de l\'enregistrement.', 'error');
+                } finally {
+                    setBusy(false);
+                }
+            }
+
+            approveBtn.addEventListener('click', function () {
+                submitDecision('partner/consent/approve', 'Merci, votre accord est enregistre.');
+            });
+
+            rejectBtn.addEventListener('click', function () {
+                submitDecision('partner/consent/reject', 'Votre refus a bien ete enregistre.');
+            });
+
+            loadRequest();
+        })();
+    </script>
+</body>
+</html>
+        <?php
+        exit;
 }
 
 /**

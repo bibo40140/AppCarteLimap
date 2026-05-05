@@ -9,9 +9,35 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+add_action('init', function (): void {
+  $partnerType = limap_sync_get_partner_post_type();
+  if (!post_type_exists($partnerType)) {
+    register_post_type($partnerType, [
+      'labels' => [
+        'name' => 'Partenaires',
+        'singular_name' => 'Partenaire',
+      ],
+      'public' => true,
+      'has_archive' => true,
+      'rewrite' => ['slug' => $partnerType],
+      'supports' => ['title', 'editor', 'excerpt', 'thumbnail'],
+      'show_in_rest' => true,
+    ]);
+  }
+
+  // Ensure rewrite rules are refreshed once after introducing partner CPT support.
+  if (get_option('limap_sync_partner_rewrite_flushed', '0') !== '1') {
+    flush_rewrite_rules(false);
+    update_option('limap_sync_partner_rewrite_flushed', '1', false);
+  }
+
+  add_shortcode('limap_partners', 'limap_sync_render_partners_shortcode');
+});
+
 add_action('wp_head', function (): void {
   $supplierType = limap_sync_get_supplier_post_type();
-  if (!is_singular('client') && !is_singular($supplierType)) {
+  $partnerType = limap_sync_get_partner_post_type();
+  if (!is_singular('client') && !is_singular($supplierType) && !is_singular($partnerType)) {
         return;
     }
     limap_sync_output_styles();
@@ -375,6 +401,12 @@ add_action('rest_api_init', function (): void {
     'callback' => 'limap_sync_handle_supplier_event',
     'permission_callback' => '__return_true',
   ]);
+
+  register_rest_route('limap-sync/v1', '/partners', [
+    'methods' => 'POST',
+    'callback' => 'limap_sync_handle_partner_event',
+    'permission_callback' => '__return_true',
+  ]);
 });
 
 function limap_sync_verify_signed_payload(WP_REST_Request $request)
@@ -478,6 +510,39 @@ function limap_sync_handle_client_event(WP_REST_Request $request): WP_REST_Respo
 
     return new WP_REST_Response(['ok' => true, 'action' => 'upsert', 'post_id' => (int)$postId], 200);
   }
+
+function limap_sync_handle_partner_event(WP_REST_Request $request): WP_REST_Response
+{
+  $payload = limap_sync_verify_signed_payload($request);
+  if (is_wp_error($payload)) {
+    return new WP_REST_Response(['ok' => false, 'error' => $payload->get_error_code()], 401);
+  }
+
+  $event = (string)($payload['event'] ?? '');
+  $partner = is_array($payload['partner'] ?? null) ? $payload['partner'] : $payload;
+  $idSource = isset($partner['id_source']) ? (int)$partner['id_source'] : (int)($payload['id_source'] ?? 0);
+
+  if ($idSource <= 0) {
+    return new WP_REST_Response(['ok' => false, 'error' => 'missing_id_source'], 422);
+  }
+
+  $publicVisible = !empty($partner['public_visible']) || !empty($payload['public_visible']);
+  if ($event === 'partner_delete' || !$publicVisible) {
+    $deleted = limap_sync_delete_partner_post($idSource, $partner);
+    return new WP_REST_Response(['ok' => true, 'action' => 'delete', 'deleted' => $deleted], 200);
+  }
+
+  $postId = limap_sync_upsert_partner_post($partner);
+  if (is_wp_error($postId)) {
+    return new WP_REST_Response([
+      'ok' => false,
+      'error' => 'upsert_failed',
+      'message' => $postId->get_error_message(),
+    ], 500);
+  }
+
+  return new WP_REST_Response(['ok' => true, 'action' => 'upsert', 'post_id' => (int)$postId], 200);
+}
 
 function limap_sync_find_client_post_id(int $idSource): int
 {
@@ -1028,3 +1093,286 @@ function limap_sync_render_client_content(array $client): string
     <?php
     return (string)ob_get_clean();
   }
+
+function limap_sync_get_partner_post_type(): string
+{
+  $configured = sanitize_key((string)get_option('limap_sync_partner_post_type', 'partenaire'));
+  if ($configured !== '' && post_type_exists($configured)) {
+    return $configured;
+  }
+
+  foreach (['partenaire', 'partenaires', 'partner', 'partners'] as $candidate) {
+    if (post_type_exists($candidate)) {
+      return $candidate;
+    }
+  }
+
+  return $configured !== '' ? $configured : 'partenaire';
+}
+
+function limap_sync_find_partner_post_id(int $idSource): int
+{
+  $postType = limap_sync_get_partner_post_type();
+  foreach (['limap_partner_id_source', 'limap_id_source', 'id_source'] as $metaKey) {
+    $query = new WP_Query([
+      'post_type' => $postType,
+      'post_status' => 'any',
+      'posts_per_page' => 1,
+      'fields' => 'ids',
+      'meta_query' => [[
+        'key' => $metaKey,
+        'value' => (string)$idSource,
+      ]],
+    ]);
+
+    if (!empty($query->posts)) {
+      return (int)$query->posts[0];
+    }
+  }
+
+  return 0;
+}
+
+function limap_sync_find_partner_post_id_by_identity(array $partner): int
+{
+  $postType = limap_sync_get_partner_post_type();
+  $slug = sanitize_title((string)($partner['slug'] ?? ''));
+  if ($slug !== '') {
+    $query = new WP_Query([
+      'post_type' => $postType,
+      'post_status' => 'any',
+      'posts_per_page' => 1,
+      'fields' => 'ids',
+      'name' => $slug,
+    ]);
+    if (!empty($query->posts)) {
+      return (int)$query->posts[0];
+    }
+  }
+
+  $name = sanitize_text_field((string)($partner['name'] ?? ''));
+  if ($name !== '') {
+    $needle = limap_sync_normalize_lookup_text($name);
+    $allIds = get_posts([
+      'post_type' => $postType,
+      'post_status' => 'any',
+      'posts_per_page' => -1,
+      'fields' => 'ids',
+      'suppress_filters' => true,
+    ]);
+
+    foreach ($allIds as $postId) {
+      $title = (string)get_the_title((int)$postId);
+      if ($title !== '' && limap_sync_normalize_lookup_text($title) === $needle) {
+        return (int)$postId;
+      }
+    }
+  }
+
+  return 0;
+}
+
+function limap_sync_delete_partner_post(int $idSource, array $partner = []): bool
+{
+  $postId = limap_sync_find_partner_post_id($idSource);
+  if ($postId <= 0 && !empty($partner)) {
+    $postId = limap_sync_find_partner_post_id_by_identity($partner);
+  }
+  if ($postId <= 0) {
+    return false;
+  }
+
+  wp_delete_post($postId, true);
+  return true;
+}
+
+function limap_sync_upsert_partner_post(array $partner)
+{
+  $idSource = (int)($partner['id_source'] ?? 0);
+  $name = sanitize_text_field((string)($partner['name'] ?? ''));
+  $slug = sanitize_title((string)($partner['slug'] ?? ''));
+
+  if ($idSource <= 0 || $name === '') {
+    return new WP_Error('invalid_partner_payload', 'Missing required partner payload fields.');
+  }
+
+  $postId = limap_sync_find_partner_post_id($idSource);
+  if ($postId <= 0) {
+    $postId = limap_sync_find_partner_post_id_by_identity($partner);
+  }
+  $content = limap_sync_render_partner_content($partner);
+  $excerpt = wp_strip_all_tags((string)($partner['description_short'] ?? ''));
+
+  $postData = [
+    'post_type' => limap_sync_get_partner_post_type(),
+    'post_status' => 'publish',
+    'post_title' => $name,
+    'post_name' => $slug !== '' ? $slug : null,
+    'post_content' => $content,
+    'post_excerpt' => $excerpt,
+  ];
+
+  if ($postId > 0) {
+    $postData['ID'] = $postId;
+    $result = wp_update_post($postData, true);
+  } else {
+    $result = wp_insert_post($postData, true);
+    if (!is_wp_error($result)) {
+      $postId = (int)$result;
+    }
+  }
+
+  if (is_wp_error($result)) {
+    return $result;
+  }
+
+  update_post_meta($postId, 'limap_partner_id_source', (string)$idSource);
+  update_post_meta($postId, 'limap_partner_payload', wp_json_encode($partner));
+  limap_sync_update_featured_image($postId, (string)($partner['logo_url'] ?? ''), (string)($partner['photo_cover_url'] ?? ''));
+
+  return $postId;
+}
+
+function limap_sync_render_partner_content(array $partner): string
+{
+  $f = static function (string $key) use ($partner): string {
+    return trim((string)($partner[$key] ?? ''));
+  };
+
+  $title = esc_html($f('name'));
+  $type = esc_html($f('partner_type'));
+  $desc = wp_kses_post($f('description_long'));
+  $short = esc_html($f('description_short'));
+  $city = esc_html($f('city'));
+  $address = esc_html(trim($f('address') . ' ' . $f('postal_code') . ' ' . $f('city') . ' ' . $f('country')));
+  $showPhone = !empty($partner['show_phone_public']);
+  $showEmail = !empty($partner['show_email_public']);
+  $phone = esc_html($f('phone'));
+  $email = esc_html($f('email'));
+  $website = esc_url($f('website'));
+  $logo = esc_url(limap_sync_normalize_media_url($f('logo_url')));
+  $facebook = esc_url($f('facebook_url') !== '' ? $f('facebook_url') : $f('facebook'));
+  $instagram = esc_url($f('instagram_url') !== '' ? $f('instagram_url') : $f('instagram'));
+  $linkedin = esc_url($f('linkedin_url') !== '' ? $f('linkedin_url') : $f('linkedin'));
+  $galleryJson = $f('gallery_images');
+  $gallery = [];
+  if ($galleryJson !== '') {
+    $decoded = json_decode($galleryJson, true);
+    if (is_array($decoded)) {
+      $gallery = $decoded;
+    }
+  }
+
+  ob_start();
+  ?>
+  <div class="client-side-wrap limap-client-sync">
+    <div class="left-col">
+      <div class="client-logo-wrap">
+        <?php if ($logo !== ''): ?>
+          <img class="client-logo-main" src="<?php echo $logo; ?>" alt="<?php echo $title; ?>" loading="lazy" />
+        <?php endif; ?>
+      </div>
+      <h1><?php echo $title; ?></h1>
+      <?php if ($short !== ''): ?><p><?php echo $short; ?></p><?php endif; ?>
+      <?php if ($desc !== ''): ?><div><?php echo $desc; ?></div><?php endif; ?>
+      <?php if (!empty($gallery)): ?>
+        <div class="limap-gallery">
+          <h2>Galerie</h2>
+          <div class="limap-gallery-grid">
+            <?php foreach ($gallery as $image): ?>
+              <?php $imgUrl = esc_url(limap_sync_normalize_media_url((string)($image['url'] ?? ''))); ?>
+              <?php if ($imgUrl !== ''): ?>
+                <div class="limap-gallery-item"><img src="<?php echo $imgUrl; ?>" alt="<?php echo $title; ?>" loading="lazy" /></div>
+              <?php endif; ?>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      <?php endif; ?>
+    </div>
+    <div class="right-col">
+      <div class="project-info">
+        <?php if ($type !== ''): ?><p><strong>Type:</strong> <?php echo $type; ?></p><?php endif; ?>
+        <p><strong>Ville:</strong> <?php echo $city; ?></p>
+        <p><strong>Adresse:</strong> <?php echo $address; ?></p>
+        <?php if ($showPhone && $phone !== ''): ?><p><strong>Téléphone:</strong> <?php echo $phone; ?></p><?php endif; ?>
+        <?php if ($showEmail && $email !== ''): ?><p><strong>Email:</strong> <a href="mailto:<?php echo $email; ?>"><?php echo $email; ?></a></p><?php endif; ?>
+        <?php if ($website !== ''): ?><p><strong>Site web:</strong> <a href="<?php echo $website; ?>" target="_blank" rel="noopener"><?php echo $website; ?></a></p><?php endif; ?>
+        <?php if ($facebook !== '' || $instagram !== '' || $linkedin !== ''): ?>
+          <div>
+            <strong style="display: block; margin-bottom: 0.8em;">Réseaux sociaux</strong>
+            <div class="social-links">
+              <?php if ($facebook !== ''): ?><a href="<?php echo $facebook; ?>" target="_blank" rel="noopener">Facebook</a><?php endif; ?>
+              <?php if ($instagram !== ''): ?><a href="<?php echo $instagram; ?>" target="_blank" rel="noopener">Instagram</a><?php endif; ?>
+              <?php if ($linkedin !== ''): ?><a href="<?php echo $linkedin; ?>" target="_blank" rel="noopener">LinkedIn</a><?php endif; ?>
+            </div>
+          </div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+  <?php
+  return (string)ob_get_clean();
+}
+
+function limap_sync_render_partners_shortcode($atts = []): string
+{
+  $atts = shortcode_atts([
+    'type' => '',
+    'limit' => 200,
+  ], $atts, 'limap_partners');
+
+  $query = new WP_Query([
+    'post_type' => limap_sync_get_partner_post_type(),
+    'post_status' => 'publish',
+    'posts_per_page' => max(1, (int)$atts['limit']),
+    'orderby' => 'title',
+    'order' => 'ASC',
+  ]);
+
+  if (empty($query->posts)) {
+    return '<div class="limap-partners-listing"><p>Aucun partenaire à afficher.</p></div>';
+  }
+
+  $typeFilter = sanitize_text_field((string)$atts['type']);
+  $cards = [];
+  foreach ($query->posts as $post) {
+    $payload = json_decode((string)get_post_meta($post->ID, 'limap_partner_payload', true), true);
+    if (!is_array($payload)) {
+      continue;
+    }
+    $partnerType = trim((string)($payload['partner_type'] ?? ''));
+    if ($typeFilter !== '' && strcasecmp($partnerType, $typeFilter) !== 0) {
+      continue;
+    }
+
+    $title = esc_html(get_the_title($post));
+    $prettyUrl = get_permalink($post);
+    $fallbackUrl = add_query_arg([
+      'post_type' => get_post_type($post),
+      'p' => (int)$post->ID,
+    ], home_url('/'));
+    $url = esc_url(is_string($prettyUrl) && $prettyUrl !== '' ? $prettyUrl : $fallbackUrl);
+    $city = esc_html((string)($payload['city'] ?? ''));
+    $short = esc_html((string)($payload['description_short'] ?? ''));
+    $logo = esc_url(limap_sync_normalize_media_url((string)($payload['logo_url'] ?? '')));
+
+    $cards[] = '<article class="limap-partner-card">'
+      . ($logo !== '' ? '<div class="limap-partner-card__media"><img src="' . $logo . '" alt="' . $title . '" loading="lazy" /></div>' : '')
+      . '<div class="limap-partner-card__body">'
+      . '<p class="limap-partner-card__type">' . esc_html($partnerType) . '</p>'
+      . '<h3><a href="' . $url . '">' . $title . '</a></h3>'
+      . ($city !== '' ? '<p><strong>Ville:</strong> ' . $city . '</p>' : '')
+      . ($short !== '' ? '<p>' . $short . '</p>' : '')
+      . '<p><a href="' . $url . '">Voir la fiche</a></p>'
+      . '</div>'
+      . '</article>';
+  }
+
+  if (!$cards) {
+    return '<div class="limap-partners-listing"><p>Aucun partenaire ne correspond au filtre demandé.</p></div>';
+  }
+
+  $style = '<style>.limap-partners-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px}.limap-partner-card{border:1px solid #d8e0d7;border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.06)}.limap-partner-card__media img{display:block;width:100%;height:180px;object-fit:cover}.limap-partner-card__body{padding:18px}.limap-partner-card__type{margin:0 0 8px;color:#4b6b57;font-size:.9rem;text-transform:uppercase;letter-spacing:.04em}</style>';
+
+  return $style . '<div class="limap-partners-listing"><div class="limap-partners-grid">' . implode('', $cards) . '</div></div>';
+}

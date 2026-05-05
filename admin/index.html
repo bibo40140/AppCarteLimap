@@ -41,6 +41,7 @@
         <button class="tab-btn" data-tab="labels" type="button">Labels</button>
         <button class="tab-btn" data-tab="types" type="button">Types</button>
         <button class="tab-btn" data-tab="suppliers" type="button">Fournisseurs</button>
+        <button class="tab-btn" data-tab="partners" type="button">Partenaires</button>
         <button class="tab-btn" data-tab="users" type="button">Utilisateurs</button>
         <button class="tab-btn" data-tab="traces" type="button">Traces</button>
         <button class="tab-btn" data-tab="requests" type="button">Demandes</button>
@@ -501,6 +502,86 @@
         <div id="supplierLinkRequestsTable" style="margin-top:8px;"></div>
       </div>
     </section>
+
+      <section id="panel-partners" class="tab-panel">
+        <div class="card">
+        <h3>Créer / modifier un partenaire</h3>
+        <form id="formPartner" class="grid">
+          <input type="hidden" id="partnerId" />
+          <label>Nom <input id="partnerName" required /></label>
+          <label>Type <input id="partnerType" placeholder="ex: Collectivité, Association, Média..." /></label>
+          <label>Téléphone <input id="partnerPhone" /></label>
+          <label>Email <input id="partnerEmail" /></label>
+          <label>Site web <input id="partnerWebsite" /></label>
+          <label>Slug public <input id="partnerSlug" placeholder="genere automatiquement si vide" /></label>
+          <label>Facebook <input id="partnerFacebook" placeholder="https://facebook.com/..." /></label>
+          <label>Instagram <input id="partnerInstagram" placeholder="https://instagram.com/..." /></label>
+          <label>LinkedIn <input id="partnerLinkedin" placeholder="https://linkedin.com/..." /></label>
+          <label>Logo (URL) <input id="partnerLogoUrl" placeholder="https://..." /></label>
+          <label>Image de couverture (URL) <input id="partnerCoverUrl" placeholder="https://..." /></label>
+          <label>Galerie (URLs séparées par ;)
+            <input id="partnerGalleryImages" placeholder="https://... ; https://..." />
+          </label>
+          <label>Adresse <input id="partnerAddress" /></label>
+          <label>Ville <input id="partnerCity" /></label>
+          <label>Code postal <input id="partnerPostal" /></label>
+          <label>Pays <input id="partnerCountry" value="France" /></label>
+          <label>Latitude <input id="partnerLat" /></label>
+          <label>Longitude <input id="partnerLng" /></label>
+        </form>
+        <div class="grid-2" style="margin-top:8px;">
+          <label>Texte court
+            <textarea id="partnerDescriptionShort" rows="3" placeholder="Petit texte pour le listing public"></textarea>
+          </label>
+          <label>Texte long
+            <textarea id="partnerDescriptionLong" rows="6" placeholder="Presentation detaillee du partenaire"></textarea>
+          </label>
+        </div>
+        <label style="display:block;margin-top:8px;">Notes internes
+          <textarea id="partnerNotes" rows="3" placeholder="Visible uniquement en admin"></textarea>
+        </label>
+        <div class="row" style="margin-top:8px;gap:18px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="partnerIsPublic" type="checkbox" checked />
+            Visible publiquement si consentement validé
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="partnerShowPhonePublic" type="checkbox" />
+            Afficher le téléphone publiquement
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="partnerShowEmailPublic" type="checkbox" />
+            Afficher l'email publiquement
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnGeocodePartner" type="button">Géocoder adresse partenaire</button>
+          <span class="muted">Auto si latitude/longitude vides</span>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnSavePartner" class="primary">Enregistrer partenaire</button>
+          <button id="btnExportPartnersAll" type="button">Exporter partenaires CSV (consentement validé)</button>
+          <button id="btnExportPartnersChanged" type="button">Exporter partenaires modifiés</button>
+          <span id="partnerMsg" class="muted"></span>
+        </div>
+        <div class="card" style="margin-top:10px;">
+          <h4 style="margin:0 0 8px;">Filtres partenaires</h4>
+          <div class="grid-2">
+            <label>Recherche
+              <input id="partnerFilterText" placeholder="Nom, ville, email, téléphone..." />
+            </label>
+            <label>Type
+              <input id="partnerFilterType" placeholder="Tous les types" />
+            </label>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <button id="btnResetPartnerFilters" type="button">Réinitialiser filtres</button>
+            <span id="partnerFilterSummary" class="muted"></span>
+          </div>
+        </div>
+        <div id="partnersTable"></div>
+      </div>
+      </section>
 
     <section id="panel-import" class="tab-panel">
       <div class="card">

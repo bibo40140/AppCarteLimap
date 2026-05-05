@@ -104,9 +104,22 @@ try {
             resync_all_suppliers_to_wordpress($pdo);
             break;
 
+        case 'admin/wordpress-sync/partners-resync':
+            require_admin();
+            if ($method !== 'POST' && $method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            resync_all_partners_to_wordpress($pdo);
+            break;
+
         case 'admin/producer/export':
             require_admin();
             export_producers_csv($pdo);
+            break;
+
+        case 'admin/partner/export':
+            require_admin();
+            export_partners_csv($pdo);
             break;
 
         case 'admin/client-user/save':
@@ -291,6 +304,22 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             delete_supplier($pdo);
+            break;
+
+        case 'admin/partner/save':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            save_partner($pdo);
+            break;
+
+        case 'admin/partner/delete':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            delete_partner($pdo);
             break;
 
         case 'admin/import/preview':
@@ -546,6 +575,34 @@ try {
             reject_supplier_consent_from_token($pdo);
             break;
 
+        case 'partner/consent/view':
+            if ($method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            view_partner_consent_from_token($pdo);
+            break;
+
+        case 'partner/consent/page':
+            if ($method !== 'GET') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            render_partner_consent_page($pdo);
+            break;
+
+        case 'partner/consent/approve':
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            approve_partner_consent_from_token($pdo);
+            break;
+
+        case 'partner/consent/reject':
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            reject_partner_consent_from_token($pdo);
+            break;
+
         // ==================== Phase 3: Admin Routes ====================
         case 'admin/consent-overview':
             require_admin();
@@ -574,6 +631,30 @@ try {
                 json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
             }
             revoke_supplier_consent_for_admin($pdo);
+            break;
+
+        case 'admin/partner-consent/send':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            send_partner_consent_request_for_admin($pdo);
+            break;
+
+        case 'admin/partner-consent/resend':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            resend_partner_consent_for_admin($pdo);
+            break;
+
+        case 'admin/partner-consent/revoke':
+            require_admin();
+            if ($method !== 'POST') {
+                json_response(['ok' => false, 'error' => 'Méthode invalide'], 405);
+            }
+            revoke_partner_consent_for_admin($pdo);
             break;
 
         // ==================== Original Routes ====================
@@ -757,6 +838,62 @@ function admin_bootstrap(PDO $pdo): void
          ORDER BY s.name"
     )->fetchAll();
 
+    $partners = $pdo->query(
+        "SELECT p.*,
+                (
+                    SELECT pc.id
+                    FROM partner_consents pc
+                    WHERE pc.partner_id = p.id AND pc.status = 'approved' AND pc.revoked_at IS NULL
+                    ORDER BY pc.id DESC
+                    LIMIT 1
+                ) AS partner_consent_id,
+                (
+                    SELECT pr.id
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_request_id,
+                (
+                    SELECT pr.status
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_request_status,
+                (
+                    SELECT pr.requested_at
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_requested_at,
+                (
+                    SELECT pr.answered_at
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_answered_at,
+                (
+                    SELECT pr.expires_at
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_expires_at,
+                (
+                    SELECT pr.recipient_email
+                    FROM partner_consent_requests pr
+                    WHERE pr.partner_id = p.id
+                    ORDER BY pr.id DESC
+                    LIMIT 1
+                ) AS partner_consent_recipient_email
+         FROM partners p
+         WHERE p.is_active = 1
+         ORDER BY p.name"
+    )->fetchAll();
+
     $clients = array_map(function (array $client) use ($pdo) {
         $client['phone'] = format_phone($client['phone'] ?? '');
         $client['logo_url'] = absolutize_export_url($pdo, (string)($client['logo_url'] ?? ''));
@@ -770,6 +907,24 @@ function admin_bootstrap(PDO $pdo): void
         $supplier['photo_cover_url'] = absolutize_export_url($pdo, (string)($supplier['photo_cover_url'] ?? ''));
         return $supplier;
     }, $suppliers);
+
+    $partners = array_map(function (array $partner) use ($pdo) {
+        $partner['phone'] = format_phone($partner['phone'] ?? '');
+        $partner['logo_url'] = absolutize_export_url($pdo, (string)($partner['logo_url'] ?? ''));
+        $partner['photo_cover_url'] = absolutize_export_url($pdo, (string)($partner['photo_cover_url'] ?? ''));
+
+        $requestStatus = (string)($partner['partner_consent_request_status'] ?? '');
+        $expiresAt = (string)($partner['partner_consent_expires_at'] ?? '');
+        if ($requestStatus !== '' && in_array($requestStatus, ['sent', 'opened'], true) && $expiresAt !== '' && strtotime($expiresAt) < time()) {
+            $requestStatus = 'expired';
+        }
+
+        $status = !empty($partner['partner_consent_id']) ? 'approved' : ($requestStatus !== '' ? $requestStatus : 'none');
+        $partner['partner_consent_status'] = $status;
+        $partner['partner_consent_can_send'] = ($status === 'none');
+        $partner['partner_consent_can_resend'] = in_array($status, ['sent', 'opened', 'expired', 'rejected', 'error'], true);
+        return $partner;
+    }, $partners);
 
     $activities = array_map(function (array $activity) use ($pdo) {
         $activity['icon_url'] = absolutize_export_url($pdo, (string)($activity['icon_url'] ?? ''));
@@ -793,6 +948,7 @@ function admin_bootstrap(PDO $pdo): void
         'labels' => $labels,
         'supplier_types' => $supplierTypes,
         'suppliers' => $suppliers,
+        'partners' => $partners,
         'settings' => $settings,
         'password_reset_audit' => $resetAudit,
         'supplier_link_request_pending_count' => $linkRequestPending,
@@ -1500,6 +1656,30 @@ function is_supplier_publicly_visible(PDO $pdo, int $supplierId): bool
     return (int)$stmt->fetchColumn() > 0;
 }
 
+function is_partner_publicly_visible(PDO $pdo, int $partnerId): bool
+{
+    if ($partnerId <= 0) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM partners p
+         WHERE p.id = :id
+           AND p.is_active = 1
+           AND p.is_public = 1
+           AND EXISTS (
+               SELECT 1
+               FROM partner_consents pc
+               WHERE pc.partner_id = p.id
+                 AND pc.status = 'approved'
+                 AND pc.revoked_at IS NULL
+           )"
+    );
+    $stmt->execute([':id' => $partnerId]);
+    return (int)$stmt->fetchColumn() > 0;
+}
+
 function resync_all_suppliers_to_wordpress(PDO $pdo): void
 {
     @set_time_limit(120);
@@ -1636,6 +1816,142 @@ function sync_supplier_to_wordpress(PDO $pdo, int $supplierId): void
             ],
         ]);
         error_log('AppCarte WP sync failed for supplier #' . $supplierId . ': ' . $e->getMessage());
+    }
+}
+
+function resync_all_partners_to_wordpress(PDO $pdo): void
+{
+    @set_time_limit(120);
+
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $limit = (int)($_GET['limit'] ?? 30);
+    if ($limit <= 0 || $limit > 200) {
+        $limit = 30;
+    }
+
+    $total = (int)$pdo->query('SELECT COUNT(*) FROM partners')->fetchColumn();
+
+    $stmt = $pdo->prepare('SELECT id FROM partners ORDER BY id LIMIT :lim OFFSET :off');
+    $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $processed = 0;
+    foreach ($rows as $row) {
+        $partnerId = (int)($row['id'] ?? 0);
+        if ($partnerId <= 0) {
+            continue;
+        }
+        sync_partner_to_wordpress($pdo, $partnerId);
+        $processed++;
+    }
+
+    $nextOffset = $offset + count($rows);
+    $done = $nextOffset >= $total;
+
+    json_response([
+        'ok' => true,
+        'total' => $total,
+        'processed' => $processed,
+        'synced' => $processed,
+        'offset' => $offset,
+        'next_offset' => $nextOffset,
+        'done' => $done,
+    ]);
+}
+
+function sync_partner_to_wordpress(PDO $pdo, int $partnerId): void
+{
+    if ($partnerId <= 0) {
+        return;
+    }
+
+    try {
+        $config = require __DIR__ . '/config.php';
+
+        $baseSync = is_array($config['wordpress_sync'] ?? null) ? $config['wordpress_sync'] : [];
+        $partnerSync = is_array($config['wordpress_sync_partners'] ?? null) ? $config['wordpress_sync_partners'] : [];
+
+        $enabled = array_key_exists('enabled', $partnerSync)
+            ? !empty($partnerSync['enabled'])
+            : !empty($baseSync['enabled']);
+
+        if (!$enabled) {
+            return;
+        }
+
+        $endpoint = trim((string)($partnerSync['endpoint'] ?? ''));
+        if ($endpoint === '') {
+            $baseEndpoint = trim((string)($baseSync['endpoint'] ?? ''));
+            if ($baseEndpoint !== '') {
+                $endpoint = preg_replace('#/(clients|suppliers)/?$#', '/partners', $baseEndpoint) ?? '';
+            }
+        }
+
+        $secret = (string)($partnerSync['secret'] ?? '');
+        if ($secret === '') {
+            $secret = (string)($baseSync['secret'] ?? '');
+        }
+
+        $timeout = (int)($partnerSync['timeout_seconds'] ?? ($baseSync['timeout_seconds'] ?? 8));
+        $timeout = max(2, $timeout);
+
+        if ($endpoint === '' || $secret === '') {
+            write_admin_audit($pdo, 'wordpress_sync_partner_failed', [
+                'target_type' => 'partner',
+                'target_id' => $partnerId,
+                'details' => ['reason' => 'missing_config'],
+            ]);
+            return;
+        }
+
+        $payload = build_partner_sync_payload($pdo, $partnerId);
+        $variants = build_partner_sync_payload_variants($payload);
+
+        $statusCode = 0;
+        $responseBody = '';
+        $acceptedVariant = -1;
+
+        foreach ($variants as $idx => $variantPayload) {
+            $json = json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($json)) {
+                continue;
+            }
+
+            $timestamp = (string)time();
+            $signature = hash_hmac('sha256', $timestamp . '.' . $json, $secret);
+            [$statusCode, $responseBody] = post_json_signed($endpoint, $json, $timestamp, $signature, $timeout);
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                $acceptedVariant = $idx;
+                break;
+            }
+
+            if (stripos((string)$responseBody, 'missing_id_source') === false) {
+                break;
+            }
+        }
+
+        if ($statusCode < 200 || $statusCode >= 300) {
+            throw new RuntimeException('HTTP ' . $statusCode . ' - ' . mb_substr((string)$responseBody, 0, 700));
+        }
+
+        write_admin_audit($pdo, 'wordpress_sync_partner_ok', [
+            'target_type' => 'partner',
+            'target_id' => $partnerId,
+            'details' => [
+                'status_code' => $statusCode,
+                'variant' => $acceptedVariant,
+            ],
+        ]);
+    } catch (Throwable $e) {
+        write_admin_audit($pdo, 'wordpress_sync_partner_failed', [
+            'target_type' => 'partner',
+            'target_id' => $partnerId,
+            'details' => ['error' => $e->getMessage()],
+        ]);
+        error_log('AppCarte WP sync failed for partner #' . $partnerId . ': ' . $e->getMessage());
     }
 }
 
@@ -1805,6 +2121,74 @@ function post_json_signed(string $url, string $jsonBody, string $timestamp, stri
         $statusCode = (int)$m[1];
     }
     return [$statusCode, $response === false ? '' : (string)$response];
+}
+
+function build_partner_sync_payload(PDO $pdo, int $partnerId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT id, name, slug, partner_type, address, city, postal_code, country, latitude, longitude,
+                phone, email, website, facebook_url, instagram_url, linkedin_url,
+                logo_url, photo_cover_url, gallery_images, description_short, description_long,
+                is_public, show_phone_public, show_email_public, updated_at
+         FROM partners
+         WHERE id=:id
+         LIMIT 1'
+    );
+    $stmt->execute([':id' => $partnerId]);
+    $partner = $stmt->fetch();
+
+    if (!$partner) {
+        return [
+            'event' => 'partner_delete',
+            'id_source' => $partnerId,
+            'public_visible' => false,
+            'deleted' => true,
+        ];
+    }
+
+    $publicVisible = is_partner_publicly_visible($pdo, $partnerId);
+    $operation = $publicVisible ? 'upsert' : 'delete';
+    $galleryUrls = absolutize_gallery_images_list($pdo, (string)($partner['gallery_images'] ?? ''));
+    $galleryImagesJson = $galleryUrls
+        ? json_encode(array_map(static fn(string $url): array => ['url' => $url], $galleryUrls), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        : '';
+
+    $partnerData = [
+        'id_source' => (int)$partner['id'],
+        'name' => (string)($partner['name'] ?? ''),
+        'slug' => (string)($partner['slug'] ?? ''),
+        'partner_type' => (string)($partner['partner_type'] ?? ''),
+        'address' => (string)($partner['address'] ?? ''),
+        'city' => (string)($partner['city'] ?? ''),
+        'postal_code' => (string)($partner['postal_code'] ?? ''),
+        'country' => (string)($partner['country'] ?? ''),
+        'latitude' => ($partner['latitude'] ?? null) !== null ? (float)$partner['latitude'] : null,
+        'longitude' => ($partner['longitude'] ?? null) !== null ? (float)$partner['longitude'] : null,
+        'phone' => (string)($partner['phone'] ?? ''),
+        'email' => (string)($partner['email'] ?? ''),
+        'website' => (string)($partner['website'] ?? ''),
+        'facebook_url' => (string)($partner['facebook_url'] ?? ''),
+        'instagram_url' => (string)($partner['instagram_url'] ?? ''),
+        'linkedin_url' => (string)($partner['linkedin_url'] ?? ''),
+        'logo_url' => absolutize_export_url($pdo, (string)($partner['logo_url'] ?? '')),
+        'photo_cover_url' => absolutize_export_url($pdo, (string)($partner['photo_cover_url'] ?? '')),
+        'gallery_images' => $galleryImagesJson,
+        'description_short' => (string)($partner['description_short'] ?? ''),
+        'description_long' => (string)($partner['description_long'] ?? ''),
+        'show_phone_public' => (int)($partner['show_phone_public'] ?? 0) === 1,
+        'show_email_public' => (int)($partner['show_email_public'] ?? 0) === 1,
+        'is_public' => (int)($partner['is_public'] ?? 0) === 1,
+        'deleted' => !$publicVisible,
+        'public_visible' => $publicVisible,
+        'updated_at' => (string)($partner['updated_at'] ?? ''),
+    ];
+
+    $payload = $partnerData;
+    $payload['event'] = $operation === 'delete' ? 'partner_delete' : 'partner_upsert';
+    $payload['operation'] = $operation;
+    $payload['partner'] = $partnerData;
+
+    return $payload;
 }
 
 function export_clients_csv(PDO $pdo): void
@@ -1979,6 +2363,77 @@ function export_producers_csv(PDO $pdo): void
     set_setting_value($pdo, 'producer_export_last_at', date('Y-m-d H:i:s'));
     $suffix = $scope === 'changed' ? 'changed' : 'all';
     csv_response($headers, $rows, 'fournisseurs-wordpress-' . $suffix . '-' . date('Ymd-His') . '.csv');
+}
+
+function export_partners_csv(PDO $pdo): void
+{
+    $scope = trim((string)($_GET['scope'] ?? 'all'));
+    $lastExportedAt = trim((string)get_setting_value($pdo, 'partner_export_last_at', ''));
+    $where = [
+        'p.is_active = 1',
+        'p.is_public = 1',
+        'EXISTS (
+            SELECT 1
+            FROM partner_consents pc
+            WHERE pc.partner_id = p.id
+              AND pc.status = "approved"
+              AND pc.revoked_at IS NULL
+        )',
+    ];
+    $params = [];
+
+    if ($scope === 'changed' && $lastExportedAt !== '') {
+        $where[] = '(
+            COALESCE(p.public_updated_at, p.updated_at) >= :since
+            OR EXISTS (
+                SELECT 1
+                FROM partner_consents pc2
+                WHERE pc2.partner_id = p.id
+                  AND ((pc2.approved_at IS NOT NULL AND pc2.approved_at >= :since)
+                    OR (pc2.revoked_at IS NOT NULL AND pc2.revoked_at >= :since))
+            )
+        )';
+        $params[':since'] = $lastExportedAt;
+    }
+
+    $sql = 'SELECT p.id, p.name, p.slug, p.partner_type, p.description_short, p.description_long,
+                   p.address, p.city, p.postal_code, p.country, p.latitude, p.longitude,
+                   p.phone, p.email, p.website, p.facebook_url, p.instagram_url, p.linkedin_url,
+                   p.logo_url, p.photo_cover_url, p.gallery_images,
+                   p.show_phone_public, p.show_email_public,
+                   p.is_public, p.public_updated_at, p.updated_at
+            FROM partners p
+            WHERE ' . implode(' AND ', $where) . '
+            ORDER BY p.name';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    $rows = array_map(function (array $row) use ($pdo): array {
+        $row['id_source'] = (int)$row['id'];
+        unset($row['id']);
+        $row['logo_url'] = absolutize_export_url($pdo, (string)($row['logo_url'] ?? ''));
+        $row['photo_cover_url'] = absolutize_export_url($pdo, (string)($row['photo_cover_url'] ?? ''));
+        $galleryUrls = absolutize_gallery_images_list($pdo, (string)($row['gallery_images'] ?? ''));
+        $row['gallery_images'] = $galleryUrls
+            ? json_encode(array_map(static fn(string $url): array => ['url' => $url], $galleryUrls), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : '';
+        $row['wp_post_status'] = 'publish';
+        return $row;
+    }, $rows);
+
+    $headers = [
+        'wp_post_status', 'id_source', 'name', 'slug', 'partner_type', 'description_short', 'description_long',
+        'address', 'city', 'postal_code', 'country', 'latitude', 'longitude',
+        'phone', 'email', 'website', 'facebook_url', 'instagram_url', 'linkedin_url',
+        'logo_url', 'photo_cover_url', 'gallery_images', 'show_phone_public', 'show_email_public',
+        'is_public', 'public_updated_at', 'updated_at'
+    ];
+
+    set_setting_value($pdo, 'partner_export_last_at', date('Y-m-d H:i:s'));
+    $suffix = $scope === 'changed' ? 'changed' : 'all';
+    csv_response($headers, $rows, 'partenaires-wordpress-' . $suffix . '-' . date('Ymd-His') . '.csv');
 }
 
 function save_client_user(PDO $pdo): void
@@ -3621,6 +4076,227 @@ function delete_supplier(PDO $pdo): void
 
     $pdo->prepare('DELETE FROM suppliers WHERE id=:id')->execute([':id' => $id]);
     sync_supplier_to_wordpress($pdo, $id);
+    json_response(['ok' => true]);
+}
+
+function find_existing_partner(PDO $pdo, array $partner): ?array
+{
+    $normalizedName = normalize_text((string)($partner['name'] ?? ''));
+    $phone = normalize_phone($partner['phone'] ?? '');
+    $email = mb_strtolower(trim((string)($partner['email'] ?? '')), 'UTF-8');
+
+    if ($email !== '') {
+        $stmt = $pdo->prepare('SELECT * FROM partners WHERE LOWER(email)=:email LIMIT 1');
+        $stmt->execute([':email' => $email]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    if ($phone !== '') {
+        $stmt = $pdo->prepare('SELECT * FROM partners WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone, " ", ""), ".", ""), "-", ""), "+", "") = :phone LIMIT 1');
+        $stmt->execute([':phone' => $phone]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    if ($normalizedName !== '') {
+        $stmt = $pdo->prepare('SELECT * FROM partners WHERE normalized_name=:normalized_name LIMIT 1');
+        $stmt->execute([':normalized_name' => $normalizedName]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    return null;
+}
+
+function save_partner(PDO $pdo): void
+{
+    $input = get_json_input();
+    $requestedId = isset($input['id']) ? (int)$input['id'] : 0;
+
+    $partner = [
+        'name' => trim((string)($input['name'] ?? '')),
+        'partner_type' => trim((string)($input['partner_type'] ?? '')),
+        'address' => trim((string)($input['address'] ?? '')),
+        'city' => trim((string)($input['city'] ?? '')),
+        'postal_code' => trim((string)($input['postal_code'] ?? '')),
+        'country' => trim((string)($input['country'] ?? '')) ?: 'France',
+        'latitude' => ($input['latitude'] ?? '') !== '' ? (float)$input['latitude'] : null,
+        'longitude' => ($input['longitude'] ?? '') !== '' ? (float)$input['longitude'] : null,
+        'phone' => format_phone($input['phone'] ?? ''),
+        'email' => trim((string)($input['email'] ?? '')),
+        'website' => trim((string)($input['website'] ?? '')),
+        'facebook_url' => trim((string)($input['facebook_url'] ?? '')),
+        'instagram_url' => trim((string)($input['instagram_url'] ?? '')),
+        'linkedin_url' => trim((string)($input['linkedin_url'] ?? '')),
+        'logo_url' => trim((string)($input['logo_url'] ?? '')),
+        'photo_cover_url' => trim((string)($input['photo_cover_url'] ?? '')),
+        'gallery_images' => trim((string)($input['gallery_images'] ?? '')),
+        'slug' => slugify_text((string)($input['slug'] ?? ($input['name'] ?? ''))),
+        'description_short' => trim((string)($input['description_short'] ?? '')),
+        'description_long' => trim((string)($input['description_long'] ?? '')),
+        'notes' => trim((string)($input['notes'] ?? '')),
+        'is_public' => !empty($input['is_public']) ? 1 : 0,
+        'show_phone_public' => !empty($input['show_phone_public']) ? 1 : 0,
+        'show_email_public' => !empty($input['show_email_public']) ? 1 : 0,
+    ];
+
+    if ($partner['name'] === '') {
+        json_response(['ok' => false, 'error' => 'Nom partenaire requis'], 422);
+    }
+
+    $existing = null;
+    if ($requestedId > 0) {
+        $stmt = $pdo->prepare('SELECT * FROM partners WHERE id=:id LIMIT 1');
+        $stmt->execute([':id' => $requestedId]);
+        $existing = $stmt->fetch() ?: null;
+        if (!$existing) {
+            json_response(['ok' => false, 'error' => 'Partenaire introuvable'], 404);
+        }
+    } else {
+        $existing = find_existing_partner($pdo, $partner);
+    }
+
+    if (($input['latitude'] ?? '') === '' && ($input['longitude'] ?? '') === '') {
+        $query = implode(', ', array_values(array_filter([
+            $partner['address'],
+            $partner['postal_code'],
+            $partner['city'],
+            $partner['country'],
+        ], static fn($value) => trim((string)$value) !== '')));
+        if ($query !== '') {
+            $geo = geocode_address_text($query);
+            if (is_array($geo) && isset($geo['lat'], $geo['lng'])) {
+                $partner['latitude'] = (float)$geo['lat'];
+                $partner['longitude'] = (float)$geo['lng'];
+            }
+        }
+    }
+
+    if ($existing) {
+        $partnerId = (int)$existing['id'];
+        $pdo->prepare(
+            'UPDATE partners
+             SET name=:name,
+                 normalized_name=:normalized_name,
+                 partner_type=:partner_type,
+                 address=:address,
+                 city=:city,
+                 postal_code=:postal_code,
+                 country=:country,
+                 latitude=:latitude,
+                 longitude=:longitude,
+                 phone=:phone,
+                 email=:email,
+                 website=:website,
+                 facebook_url=:facebook_url,
+                 instagram_url=:instagram_url,
+                 linkedin_url=:linkedin_url,
+                 logo_url=:logo_url,
+                 photo_cover_url=:photo_cover_url,
+                 gallery_images=:gallery_images,
+                 slug=:slug,
+                 description_short=:description_short,
+                 description_long=:description_long,
+                 notes=:notes,
+                 is_public=:is_public,
+                 show_phone_public=:show_phone_public,
+                 show_email_public=:show_email_public,
+                 public_updated_at=:public_updated_at
+             WHERE id=:id'
+        )->execute([
+            ':id' => $partnerId,
+            ':name' => $partner['name'],
+            ':normalized_name' => normalize_text($partner['name']),
+            ':partner_type' => $partner['partner_type'],
+            ':address' => $partner['address'],
+            ':city' => $partner['city'],
+            ':postal_code' => $partner['postal_code'],
+            ':country' => $partner['country'],
+            ':latitude' => $partner['latitude'],
+            ':longitude' => $partner['longitude'],
+            ':phone' => $partner['phone'],
+            ':email' => $partner['email'],
+            ':website' => $partner['website'],
+            ':facebook_url' => $partner['facebook_url'],
+            ':instagram_url' => $partner['instagram_url'],
+            ':linkedin_url' => $partner['linkedin_url'],
+            ':logo_url' => $partner['logo_url'],
+            ':photo_cover_url' => $partner['photo_cover_url'],
+            ':gallery_images' => $partner['gallery_images'],
+            ':slug' => $partner['slug'],
+            ':description_short' => $partner['description_short'],
+            ':description_long' => $partner['description_long'],
+            ':notes' => $partner['notes'],
+            ':is_public' => $partner['is_public'],
+            ':show_phone_public' => $partner['show_phone_public'],
+            ':show_email_public' => $partner['show_email_public'],
+            ':public_updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    } else {
+        $pdo->prepare(
+            'INSERT INTO partners (
+                name, normalized_name, partner_type, address, city, postal_code, country,
+                latitude, longitude, phone, email, website, facebook_url, instagram_url, linkedin_url,
+                logo_url, photo_cover_url, gallery_images, slug, description_short, description_long, notes,
+                is_public, show_phone_public, show_email_public, public_updated_at, is_active
+            ) VALUES (
+                :name, :normalized_name, :partner_type, :address, :city, :postal_code, :country,
+                :latitude, :longitude, :phone, :email, :website, :facebook_url, :instagram_url, :linkedin_url,
+                :logo_url, :photo_cover_url, :gallery_images, :slug, :description_short, :description_long, :notes,
+                :is_public, :show_phone_public, :show_email_public, :public_updated_at, 1
+            )'
+        )->execute([
+            ':name' => $partner['name'],
+            ':normalized_name' => normalize_text($partner['name']),
+            ':partner_type' => $partner['partner_type'],
+            ':address' => $partner['address'],
+            ':city' => $partner['city'],
+            ':postal_code' => $partner['postal_code'],
+            ':country' => $partner['country'],
+            ':latitude' => $partner['latitude'],
+            ':longitude' => $partner['longitude'],
+            ':phone' => $partner['phone'],
+            ':email' => $partner['email'],
+            ':website' => $partner['website'],
+            ':facebook_url' => $partner['facebook_url'],
+            ':instagram_url' => $partner['instagram_url'],
+            ':linkedin_url' => $partner['linkedin_url'],
+            ':logo_url' => $partner['logo_url'],
+            ':photo_cover_url' => $partner['photo_cover_url'],
+            ':gallery_images' => $partner['gallery_images'],
+            ':slug' => $partner['slug'],
+            ':description_short' => $partner['description_short'],
+            ':description_long' => $partner['description_long'],
+            ':notes' => $partner['notes'],
+            ':is_public' => $partner['is_public'],
+            ':show_phone_public' => $partner['show_phone_public'],
+            ':show_email_public' => $partner['show_email_public'],
+            ':public_updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $partnerId = (int)$pdo->lastInsertId();
+    }
+
+    sync_partner_to_wordpress($pdo, $partnerId);
+    json_response(['ok' => true]);
+}
+
+function delete_partner(PDO $pdo): void
+{
+    $input = get_json_input();
+    $id = isset($input['id']) ? (int)$input['id'] : 0;
+    if ($id <= 0) {
+        json_response(['ok' => false, 'error' => 'Partenaire invalide'], 422);
+    }
+
+    $pdo->prepare('DELETE FROM partners WHERE id=:id')->execute([':id' => $id]);
+    sync_partner_to_wordpress($pdo, $id);
     json_response(['ok' => true]);
 }
 
@@ -5971,6 +6647,21 @@ function build_supplier_sync_payload_variants(array $payload): array
     ];
 
     return $variants;
+}
+
+function build_partner_sync_payload_variants(array $payload): array
+{
+    return [
+        $payload,
+        ['partner' => $payload],
+        ['payload' => $payload],
+        [
+            'id_source' => (int)($payload['id_source'] ?? 0),
+            'partner' => is_array($payload['partner'] ?? null) ? $payload['partner'] : $payload,
+            'event' => (string)($payload['event'] ?? ''),
+            'public_visible' => !empty($payload['public_visible']),
+        ],
+    ];
 }
 
 function absolutize_gallery_images_list(PDO $pdo, string $rawJson): array

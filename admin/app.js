@@ -11,6 +11,7 @@ let state = {
   labels: [],
   supplier_types: [],
   suppliers: [],
+  partners: [],
   preview: null,
   previewOriginalRows: [],
   import: {
@@ -419,6 +420,80 @@ function renderSuppliers() {
     </tr>
   `).join('');
   host.innerHTML = `<table><thead><tr><th>Nom</th><th>Type</th><th>Ville</th><th>Tél</th><th>Email</th><th>Public</th><th>Activités</th><th>Clients</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function partnerConsentStatusLabel(partner) {
+  const status = String(partner.partner_consent_status || 'none');
+  if (status === 'approved') return 'Validé';
+  if (status === 'sent') return 'Envoyé';
+  if (status === 'opened') return 'Ouvert';
+  if (status === 'expired') return 'Expiré';
+  if (status === 'rejected') return 'Refusé';
+  if (status === 'error') return 'Erreur envoi';
+  return 'Non demandé';
+}
+
+function renderPartners() {
+  const host = q('partnersTable');
+  if (!host) return;
+
+  const textFilter = String(q('partnerFilterText')?.value || '').trim().toLocaleLowerCase('fr');
+  const typeFilter = String(q('partnerFilterType')?.value || '').trim().toLocaleLowerCase('fr');
+
+  const filteredPartners = (state.partners || []).filter((partner) => {
+    const partnerType = String(partner.partner_type || '').trim().toLocaleLowerCase('fr');
+    if (typeFilter && !partnerType.includes(typeFilter)) {
+      return false;
+    }
+    if (textFilter) {
+      const haystack = [
+        partner.name,
+        partner.partner_type,
+        partner.city,
+        partner.email,
+        partner.phone,
+      ]
+        .map((value) => String(value || '').toLocaleLowerCase('fr'))
+        .join(' ');
+      if (!haystack.includes(textFilter)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const summary = q('partnerFilterSummary');
+  if (summary) {
+    summary.textContent = `${filteredPartners.length} partenaire(s) affiché(s) / ${state.partners.length}`;
+  }
+
+  if (!filteredPartners.length) {
+    host.innerHTML = '<div class="muted">Aucun partenaire.</div>';
+    return;
+  }
+
+  const rows = filteredPartners.map((partner) => {
+    const requestId = Number(partner.partner_consent_request_id || 0);
+    const approved = String(partner.partner_consent_status || '') === 'approved';
+    const consentActions = approved
+      ? `<button type="button" onclick="revokePartnerConsent(${partner.id})">Révoquer consentement</button>`
+      : `<button type="button" onclick="${requestId > 0 ? `resendPartnerConsent(${requestId})` : `sendPartnerConsent(${partner.id})`}">${requestId > 0 ? 'Relancer consentement' : 'Envoyer consentement'}</button>`;
+
+    return `
+      <tr>
+        <td>${escapeHtml(partner.name || '')}</td>
+        <td>${escapeHtml(partner.partner_type || '')}</td>
+        <td>${escapeHtml(partner.city || '')}</td>
+        <td>${escapeHtml(partner.phone || '')}</td>
+        <td>${escapeHtml(partner.email || '')}</td>
+        <td>${Number(partner.is_public) === 1 ? 'Oui' : 'Non'}</td>
+        <td>${partnerConsentStatusLabel(partner)}</td>
+        <td><div class="row"><button type="button" onclick="editPartner(${partner.id})">Modifier</button>${consentActions}<button type="button" class="danger" onclick="deletePartner(${partner.id})">Supprimer</button></div></td>
+      </tr>
+    `;
+  }).join('');
+
+  host.innerHTML = `<table><thead><tr><th>Nom</th><th>Type</th><th>Ville</th><th>Tél</th><th>Email</th><th>Public</th><th>Consentement</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderClientUsers() {
@@ -1261,6 +1336,7 @@ function renderAll() {
   ], state.labels, 'editLabel', 'deleteLabel');
 
   renderSuppliers();
+  renderPartners();
   renderClientUsers();
   renderAdminUsers();
   renderResetAudit();
@@ -2635,6 +2711,7 @@ async function loadBootstrap() {
   state.labels = data.labels || [];
   state.supplier_types = data.supplier_types || [];
   state.suppliers = data.suppliers || [];
+  state.partners = data.partners || [];
   state.settings = data.settings || {};
   renderAll();
   await loadChangeRequests();
@@ -2650,6 +2727,19 @@ function resetSupplierForm() {
   q('supplierIsPublic').checked = true;
   setSupplierPickerValues('supplierActivitiesSelect', 'supplierActivities', 'supplierActivitiesChips', []);
   setSupplierPickerValues('supplierLabelsSelect', 'supplierLabels', 'supplierLabelsChips', []);
+}
+
+function resetPartnerForm() {
+  q('formPartner').reset();
+  q('partnerId').value = '';
+  q('partnerCountry').value = 'France';
+  q('partnerSlug').value = '';
+  q('partnerDescriptionShort').value = '';
+  q('partnerDescriptionLong').value = '';
+  q('partnerNotes').value = '';
+  q('partnerIsPublic').checked = true;
+  q('partnerShowPhonePublic').checked = false;
+  q('partnerShowEmailPublic').checked = false;
 }
 
 window.deleteClient = async function deleteClient(id) {
@@ -3099,6 +3189,38 @@ window.editSupplier = function editSupplier(id) {
   q('supplierMsg').textContent = `Edition du fournisseur: ${supplier.name || ''}`;
 };
 
+window.editPartner = function editPartner(id) {
+  const partner = state.partners.find(x => Number(x.id) === Number(id));
+  if (!partner) return;
+
+  q('partnerId').value = partner.id;
+  q('partnerName').value = partner.name || '';
+  q('partnerType').value = partner.partner_type || '';
+  q('partnerPhone').value = partner.phone || '';
+  q('partnerEmail').value = partner.email || '';
+  q('partnerWebsite').value = partner.website || '';
+  q('partnerSlug').value = partner.slug || '';
+  q('partnerFacebook').value = partner.facebook_url || '';
+  q('partnerInstagram').value = partner.instagram_url || '';
+  q('partnerLinkedin').value = partner.linkedin_url || '';
+  q('partnerLogoUrl').value = partner.logo_url || '';
+  q('partnerCoverUrl').value = partner.photo_cover_url || '';
+  q('partnerGalleryImages').value = partner.gallery_images || '';
+  q('partnerAddress').value = partner.address || '';
+  q('partnerCity').value = partner.city || '';
+  q('partnerPostal').value = partner.postal_code || '';
+  q('partnerCountry').value = partner.country || 'France';
+  q('partnerLat').value = partner.latitude || '';
+  q('partnerLng').value = partner.longitude || '';
+  q('partnerDescriptionShort').value = partner.description_short || '';
+  q('partnerDescriptionLong').value = partner.description_long || '';
+  q('partnerNotes').value = partner.notes || '';
+  q('partnerIsPublic').checked = Number(partner.is_public) === 1;
+  q('partnerShowPhonePublic').checked = Number(partner.show_phone_public) === 1;
+  q('partnerShowEmailPublic').checked = Number(partner.show_email_public) === 1;
+  q('partnerMsg').textContent = `Edition du partenaire: ${partner.name || ''}`;
+};
+
 window.deleteActivity = async function deleteActivity(id) {
   const activity = state.activities.find(x => Number(x.id) === Number(id));
   if (!activity) return;
@@ -3155,6 +3277,58 @@ window.deleteSupplier = async function deleteSupplier(id) {
     await loadBootstrap();
   } catch (e) {
     q('supplierMsg').textContent = e.message;
+  }
+};
+
+window.deletePartner = async function deletePartner(id) {
+  const partner = state.partners.find(x => Number(x.id) === Number(id));
+  if (!partner) return;
+  if (!window.confirm(`Supprimer le partenaire "${partner.name}" ?`)) return;
+
+  q('partnerMsg').textContent = '';
+  try {
+    await api('admin/partner/delete', 'POST', { id });
+    q('partnerMsg').textContent = 'Partenaire supprimé';
+    if (Number(q('partnerId').value) === Number(id)) {
+      resetPartnerForm();
+    }
+    await loadBootstrap();
+  } catch (e) {
+    q('partnerMsg').textContent = e.message;
+  }
+};
+
+window.sendPartnerConsent = async function sendPartnerConsent(partnerId) {
+  q('partnerMsg').textContent = '';
+  try {
+    await api('admin/partner-consent/send', 'POST', { partner_id: partnerId });
+    q('partnerMsg').textContent = 'Demande de consentement envoyée';
+    await loadBootstrap();
+  } catch (e) {
+    q('partnerMsg').textContent = e.message;
+  }
+};
+
+window.resendPartnerConsent = async function resendPartnerConsent(requestId) {
+  q('partnerMsg').textContent = '';
+  try {
+    await api('admin/partner-consent/resend', 'POST', { request_id: requestId });
+    q('partnerMsg').textContent = 'Demande de consentement relancée';
+    await loadBootstrap();
+  } catch (e) {
+    q('partnerMsg').textContent = e.message;
+  }
+};
+
+window.revokePartnerConsent = async function revokePartnerConsent(partnerId) {
+  if (!window.confirm('Révoquer le consentement public de ce partenaire ?')) return;
+  q('partnerMsg').textContent = '';
+  try {
+    await api('admin/partner-consent/revoke', 'POST', { partner_id: partnerId });
+    q('partnerMsg').textContent = 'Consentement partenaire révoqué';
+    await loadBootstrap();
+  } catch (e) {
+    q('partnerMsg').textContent = e.message;
   }
 };
 
@@ -3477,6 +3651,91 @@ function bindEvents() {
     window.open('../api/index.php?' + params.toString(), '_blank');
   });
 
+  q('btnSavePartner').addEventListener('click', async () => {
+    q('partnerMsg').textContent = '';
+    try {
+      if (isEmptyCoord(q('partnerLat').value) || isEmptyCoord(q('partnerLng').value)) {
+        const addr = buildAddress([q('partnerAddress').value, q('partnerPostal').value, q('partnerCity').value, q('partnerCountry').value]);
+        const geo = await geocodeAddress(addr);
+        if (geo) {
+          q('partnerLat').value = geo.lat;
+          q('partnerLng').value = geo.lng;
+        }
+      }
+
+      await api('admin/partner/save', 'POST', {
+        id: q('partnerId').value || null,
+        name: q('partnerName').value,
+        partner_type: q('partnerType').value,
+        phone: q('partnerPhone').value,
+        email: q('partnerEmail').value,
+        website: q('partnerWebsite').value,
+        slug: q('partnerSlug').value,
+        facebook_url: q('partnerFacebook').value,
+        instagram_url: q('partnerInstagram').value,
+        linkedin_url: q('partnerLinkedin').value,
+        logo_url: q('partnerLogoUrl').value,
+        photo_cover_url: q('partnerCoverUrl').value,
+        gallery_images: q('partnerGalleryImages').value,
+        address: q('partnerAddress').value,
+        city: q('partnerCity').value,
+        postal_code: q('partnerPostal').value,
+        country: q('partnerCountry').value,
+        latitude: q('partnerLat').value,
+        longitude: q('partnerLng').value,
+        description_short: q('partnerDescriptionShort').value,
+        description_long: q('partnerDescriptionLong').value,
+        notes: q('partnerNotes').value,
+        is_public: q('partnerIsPublic').checked,
+        show_phone_public: q('partnerShowPhonePublic').checked,
+        show_email_public: q('partnerShowEmailPublic').checked,
+      });
+      q('partnerMsg').textContent = q('partnerId').value ? 'Partenaire modifié' : 'Partenaire enregistré';
+      resetPartnerForm();
+      await loadBootstrap();
+    } catch (e) {
+      q('partnerMsg').textContent = e.message;
+    }
+  });
+
+  q('btnGeocodePartner').addEventListener('click', async () => {
+    q('partnerMsg').textContent = '';
+    try {
+      const addr = buildAddress([q('partnerAddress').value, q('partnerPostal').value, q('partnerCity').value, q('partnerCountry').value]);
+      if (!addr) throw new Error('Adresse partenaire incomplète');
+      const geo = await geocodeAddress(addr);
+      if (!geo) throw new Error('Adresse partenaire introuvable');
+      q('partnerLat').value = geo.lat;
+      q('partnerLng').value = geo.lng;
+      q('partnerMsg').textContent = 'Coordonnées partenaire mises à jour';
+    } catch (e) {
+      q('partnerMsg').textContent = e.message;
+    }
+  });
+
+  q('btnExportPartnersAll').addEventListener('click', () => {
+    window.open('../api/index.php?action=' + encodeURIComponent('admin/partner/export'), '_blank');
+  });
+
+  q('btnExportPartnersChanged').addEventListener('click', () => {
+    const params = new URLSearchParams({ action: 'admin/partner/export', scope: 'changed' });
+    window.open('../api/index.php?' + params.toString(), '_blank');
+  });
+
+  q('partnerFilterText').addEventListener('input', () => {
+    renderPartners();
+  });
+
+  q('partnerFilterType').addEventListener('input', () => {
+    renderPartners();
+  });
+
+  q('btnResetPartnerFilters').addEventListener('click', () => {
+    q('partnerFilterText').value = '';
+    q('partnerFilterType').value = '';
+    renderPartners();
+  });
+
   q('supplierFilterText').addEventListener('input', () => {
     renderSuppliers();
   });
@@ -3778,7 +4037,8 @@ function bindEvents() {
 
       await runChunkedResync('admin/wordpress-sync/clients-resync', 'Adhérents');
       await runChunkedResync('admin/wordpress-sync/suppliers-resync', 'Producteurs');
-      msg.textContent = 'Resync WordPress terminé (adhérents + producteurs) ✓';
+      await runChunkedResync('admin/wordpress-sync/partners-resync', 'Partenaires');
+      msg.textContent = 'Resync WordPress terminé (adhérents + producteurs + partenaires) ✓';
     } catch (e) {
       const m = String(e && e.message ? e.message : 'Erreur inconnue');
       if (m.toLowerCase().includes('non autorisé') || m.toLowerCase().includes('401')) {

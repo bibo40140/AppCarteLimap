@@ -269,5 +269,93 @@ function ensure_schema_upgrades(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
 
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS partners (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(190) NOT NULL,
+            normalized_name VARCHAR(190) NOT NULL DEFAULT "",
+            partner_type VARCHAR(120) NOT NULL DEFAULT "",
+            address VARCHAR(255) NOT NULL DEFAULT "",
+            city VARCHAR(120) NOT NULL DEFAULT "",
+            postal_code VARCHAR(30) NOT NULL DEFAULT "",
+            country VARCHAR(120) NOT NULL DEFAULT "France",
+            latitude DECIMAL(10,7) NULL,
+            longitude DECIMAL(10,7) NULL,
+            phone VARCHAR(60) NOT NULL DEFAULT "",
+            email VARCHAR(190) NOT NULL DEFAULT "",
+            website VARCHAR(255) NOT NULL DEFAULT "",
+            facebook_url VARCHAR(255) NOT NULL DEFAULT "",
+            instagram_url VARCHAR(255) NOT NULL DEFAULT "",
+            linkedin_url VARCHAR(255) NOT NULL DEFAULT "",
+            logo_url VARCHAR(255) NOT NULL DEFAULT "",
+            photo_cover_url VARCHAR(255) NOT NULL DEFAULT "",
+            gallery_images LONGTEXT NULL,
+            slug VARCHAR(190) NOT NULL DEFAULT "",
+            description_short TEXT NULL,
+            description_long LONGTEXT NULL,
+            notes LONGTEXT NULL,
+            is_public TINYINT(1) NOT NULL DEFAULT 1,
+            show_phone_public TINYINT(1) NOT NULL DEFAULT 0,
+            show_email_public TINYINT(1) NOT NULL DEFAULT 0,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            public_updated_at DATETIME NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_partners_name (name),
+            INDEX idx_partners_normalized_name (normalized_name),
+            INDEX idx_partners_partner_type (partner_type),
+            INDEX idx_partners_is_public (is_public),
+            INDEX idx_partners_is_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS partner_consent_requests (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            partner_id INT NOT NULL,
+            recipient_email VARCHAR(190) NOT NULL,
+            request_token_hash VARCHAR(255) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT "sent",
+            consent_text_version VARCHAR(40) NOT NULL,
+            consent_text_snapshot LONGTEXT NOT NULL,
+            consent_text_hash VARCHAR(64) NOT NULL,
+            requested_at DATETIME NOT NULL,
+            opened_at DATETIME NULL,
+            answered_at DATETIME NULL,
+            answer_ip VARCHAR(64) NULL,
+            answer_user_agent VARCHAR(255) NULL,
+            expires_at DATETIME NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_partner_consent_requests_partner (partner_id),
+            INDEX idx_partner_consent_requests_status (status),
+            INDEX idx_partner_consent_requests_requested (requested_at),
+            INDEX idx_partner_consent_requests_expires (expires_at),
+            UNIQUE INDEX idx_partner_consent_requests_token (request_token_hash)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS partner_consents (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            partner_id INT NOT NULL,
+            approved_from_request_id BIGINT NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT "approved",
+            consent_text_version VARCHAR(40) NOT NULL,
+            consent_text_snapshot LONGTEXT NOT NULL,
+            consent_text_hash VARCHAR(64) NOT NULL,
+            approved_at DATETIME NOT NULL,
+            approved_ip VARCHAR(64) NULL,
+            approved_user_agent VARCHAR(255) NULL,
+            revoked_at DATETIME NULL,
+            revoked_by_type VARCHAR(20) NULL,
+            revoked_by_id INT NULL,
+            revoke_reason TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_partner_consents_partner (partner_id),
+            INDEX idx_partner_consents_status (status),
+            INDEX idx_partner_consents_approved_at (approved_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
     $done = true;
 }
