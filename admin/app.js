@@ -4,7 +4,6 @@ let state = {
   client_users: [],
   admin_users: [],
   password_reset_audit: [],
-  audit_logs: [],
   change_requests: [],
   supplier_create_requests: [],
   supplier_link_requests: [],
@@ -23,6 +22,58 @@ let state = {
   },
 };
 let selectedChangeRequestIds = new Set();
+
+// ── Audit pagination state ────────────────────────────────────────────
+const auditState = {
+  logs: [],
+  total: 0,
+  page: 0,
+  limit: 200,
+  loading: false,
+};
+
+async function loadAuditLogs() {
+  if (auditState.loading) return;
+  auditState.loading = true;
+  const msg = q('auditMsg');
+  if (msg) msg.textContent = 'Chargement…';
+  try {
+    const actorType = String(q('auditFilterActorType')?.value || '').trim();
+    const dateFrom = String(q('auditDateFrom')?.value || '').trim();
+    const dateTo = String(q('auditDateTo')?.value || '').trim();
+    const offset = auditState.page * auditState.limit;
+    const params = new URLSearchParams({
+      action: 'admin/audit/list',
+      limit: auditState.limit,
+      offset,
+    });
+    if (actorType) params.set('actor_type', actorType);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    const resp = await fetch('../api/index.php?' + params.toString(), { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
+    auditState.logs = data.logs || [];
+    auditState.total = data.total || 0;
+    if (msg) msg.textContent = '';
+    renderAuditLogs();
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+  } finally {
+    auditState.loading = false;
+  }
+}
+
+function exportAuditCsv() {
+  const actorType = String(q('auditFilterActorType')?.value || '').trim();
+  const dateFrom = String(q('auditDateFrom')?.value || '').trim();
+  const dateTo = String(q('auditDateTo')?.value || '').trim();
+  let url = `../api/index.php?action=admin/audit/export-csv`;
+  if (actorType) url += `&actor_type=${encodeURIComponent(actorType)}`;
+  if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+  if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
+  window.location.href = url;
+}
 
 const q = (id) => document.getElementById(id);
 const mapEditorState = { map: null, marker: null, rowIndex: null };
@@ -444,9 +495,8 @@ function renderAuditLogs() {
   const host = q('auditLogsTable');
   if (!host) return;
 
-  const rowsData = state.audit_logs || [];
+  const rowsData = auditState.logs || [];
   const textFilter = String(q('auditFilterText')?.value || '').trim().toLocaleLowerCase('fr');
-  const actorTypeFilter = String(q('auditFilterActorType')?.value || '').trim();
   const kindFilter = String(q('auditFilterKind')?.value || '').trim();
 
   const classifyLogKind = (row) => {
@@ -458,14 +508,8 @@ function renderAuditLogs() {
   };
 
   const filtered = rowsData.filter((row) => {
-    if (actorTypeFilter && String(row.actor_type || '') !== actorTypeFilter) {
-      return false;
-    }
-
     const kind = classifyLogKind(row);
-    if (kindFilter && kind !== kindFilter) {
-      return false;
-    }
+    if (kindFilter && kind !== kindFilter) return false;
 
     if (textFilter) {
       const haystack = [
@@ -479,18 +523,41 @@ function renderAuditLogs() {
         row.ip_address,
         row.user_agent,
       ].map((value) => String(value || '').toLocaleLowerCase('fr')).join(' ');
-      if (!haystack.includes(textFilter)) {
-        return false;
-      }
+      if (!haystack.includes(textFilter)) return false;
     }
 
     return true;
   });
 
+  const totalPages = Math.max(1, Math.ceil(auditState.total / auditState.limit));
+  const currentPage = auditState.page;
+
   const summary = q('auditSummary');
   if (summary) {
-    summary.textContent = `${filtered.length} trace(s) affichée(s) / ${rowsData.length}`;
+    summary.textContent = `${filtered.length} trace(s) affichée(s) sur cette page — Total DB : ${auditState.total} — Page ${currentPage + 1}/${totalPages}`;
   }
+
+  const paginationHtml = () => {
+    if (auditState.total <= auditState.limit) return '';
+    return `
+      <button class="audit-prev-btn" type="button" ${currentPage === 0 ? 'disabled' : ''}>← Précédent</button>
+      <span class="muted">Page ${currentPage + 1} / ${totalPages}</span>
+      <button class="audit-next-btn" type="button" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Suivant →</button>
+    `;
+  };
+
+  const topPag = q('auditPagination');
+  const botPag = q('auditPaginationBottom');
+  if (topPag) topPag.innerHTML = paginationHtml();
+  if (botPag) botPag.innerHTML = paginationHtml();
+
+  [topPag, botPag].forEach(pag => {
+    if (!pag) return;
+    const prev = pag.querySelector('.audit-prev-btn');
+    const next = pag.querySelector('.audit-next-btn');
+    if (prev) prev.addEventListener('click', () => { auditState.page = Math.max(0, auditState.page - 1); loadAuditLogs(); });
+    if (next) next.addEventListener('click', () => { auditState.page = Math.min(totalPages - 1, auditState.page + 1); loadAuditLogs(); });
+  });
 
   if (!filtered.length) {
     host.innerHTML = '<div class="muted">Aucune trace pour ce filtre.</div>';
@@ -827,15 +894,15 @@ function renderChangeRequests() {
     return `
       <tr>
         <td><input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleChangeRequestSelection(${Number(r.id)}, this.checked)" /></td>
-        <td>${escapeHtml(r.client_name || '')}</td>
-        <td>${escapeHtml(r.supplier_name || '')}</td>
-        <td>${escapeHtml(r.field_name || '')}</td>
-        <td>${escapeHtml(r.old_value || '')}</td>
-        <td>${escapeHtml(r.new_value || '')}</td>
+        <td>${clippedCell(r.client_name || '')}</td>
+        <td>${clippedCell(r.supplier_name || '')}</td>
+        <td>${clippedCell(r.field_name || '')}</td>
+        <td>${clippedCell(r.old_value || '')}</td>
+        <td>${clippedCell(r.new_value || '')}</td>
         <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
-        <td>${escapeHtml(r.requested_by_username || '')}</td>
-        <td>${escapeHtml(r.created_at || '')}</td>
-        <td>${reviewNote || '—'}</td>
+        <td>${clippedCell(r.requested_by_username || '')}</td>
+        <td>${clippedCell(r.created_at || '')}</td>
+        <td>${clippedCell(reviewNote, '—')}</td>
         <td>
           ${status === 'pending'
             ? `<div class="row"><button type="button" onclick="reviewChangeRequest(${r.id}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewChangeRequest(${r.id}, 'rejected')">Refuser</button></div>`
@@ -845,7 +912,7 @@ function renderChangeRequests() {
     `;
   }).join('');
 
-  host.innerHTML = `<table><thead><tr><th><input id="requestSelectAll" type="checkbox" /></th><th>Client</th><th>Fournisseur</th><th>Champ</th><th>Ancienne valeur</th><th>Nouvelle valeur</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<div class="request-table-wrap"><table class="requests-table requests-table-change"><thead><tr><th><input id="requestSelectAll" type="checkbox" /></th><th>Client</th><th>Fournisseur</th><th>Champ</th><th>Ancienne valeur</th><th>Nouvelle valeur</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 
   const selectAll = q('requestSelectAll');
   if (selectAll) {
@@ -896,14 +963,14 @@ function renderSupplierCreateRequests() {
 
     return `
       <tr>
-        <td>${escapeHtml(r.client_name || '')}</td>
-        <td>${escapeHtml(r.name || '')}</td>
-        <td>${details || '—'}</td>
+        <td>${clippedCell(r.client_name || '')}</td>
+        <td>${clippedCell(r.name || '')}</td>
+        <td>${clippedCell(details || '', '—')}</td>
         <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
-        <td>${escapeHtml(r.requested_by_username || '')}</td>
-        <td>${escapeHtml(r.created_at || '')}</td>
-        <td>${approvedName || '—'}</td>
-        <td>${reviewNote || '—'}</td>
+        <td>${clippedCell(r.requested_by_username || '')}</td>
+        <td>${clippedCell(r.created_at || '')}</td>
+        <td>${clippedCell(approvedName, '—')}</td>
+        <td>${clippedCell(reviewNote, '—')}</td>
         <td>
           ${status === 'pending'
             ? `<div class="row"><button type="button" onclick="reviewSupplierCreateRequest(${Number(r.id)}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewSupplierCreateRequest(${Number(r.id)}, 'rejected')">Refuser</button></div>`
@@ -913,7 +980,7 @@ function renderSupplierCreateRequests() {
     `;
   }).join('');
 
-  host.innerHTML = `<table><thead><tr><th>Client</th><th>Nom fournisseur</th><th>Détails</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Fournisseur créé</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<div class="request-table-wrap"><table class="requests-table requests-table-create"><thead><tr><th>Client</th><th>Nom fournisseur</th><th>Détails</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Fournisseur créé</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSupplierLinkRequests() {
@@ -939,13 +1006,13 @@ function renderSupplierLinkRequests() {
 
     return `
       <tr>
-        <td>${escapeHtml(r.client_name || '')}</td>
-        <td>${escapeHtml(details || '—')}</td>
-        <td>${note ? escapeHtml(note) : '—'}</td>
+        <td>${clippedCell(r.client_name || '')}</td>
+        <td>${clippedCell(details || '', '—')}</td>
+        <td>${clippedCell(note, '—')}</td>
         <td><span class="status-badge ${rowBadgeClass}">${escapeHtml(status)}</span></td>
-        <td>${escapeHtml(r.requested_by_username || '')}</td>
-        <td>${escapeHtml(r.created_at || '')}</td>
-        <td>${reviewNote || '—'}</td>
+        <td>${clippedCell(r.requested_by_username || '')}</td>
+        <td>${clippedCell(r.created_at || '')}</td>
+        <td>${clippedCell(reviewNote, '—')}</td>
         <td>
           ${status === 'pending'
             ? `<div class="row"><button type="button" onclick="reviewSupplierLinkRequest(${Number(r.id)}, 'approved')">Approuver</button><button type="button" class="danger" onclick="reviewSupplierLinkRequest(${Number(r.id)}, 'rejected')">Refuser</button></div>`
@@ -955,7 +1022,7 @@ function renderSupplierLinkRequests() {
     `;
   }).join('');
 
-  host.innerHTML = `<table><thead><tr><th>Client</th><th>Fournisseur</th><th>Note client</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<div class="request-table-wrap"><table class="requests-table requests-table-link"><thead><tr><th>Client</th><th>Fournisseur</th><th>Note client</th><th>Statut</th><th>Demandé par</th><th>Date</th><th>Note admin</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function updateRequestSelectionSummary() {
@@ -968,7 +1035,7 @@ function updateRequestSelectionSummary() {
 }
 
 async function loadChangeRequests() {
-  const status = q('requestStatusFilter')?.value || 'all';
+  const status = q('requestStatusFilter')?.value || 'pending';
   const clientId = Number(q('requestClientFilter')?.value || 0);
   const sortBy = q('requestSortBy')?.value || 'created_at_desc';
 
@@ -1197,7 +1264,6 @@ function renderAll() {
   renderClientUsers();
   renderAdminUsers();
   renderResetAudit();
-  renderAuditLogs();
   hydrateSelects();
   renderVisualSettings();
   renderChangeRequests();
@@ -1225,6 +1291,18 @@ function bindTabs() {
       const tab = btn.getAttribute('data-tab');
       btns.forEach(b => b.classList.toggle('active', b === btn));
       panels.forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+      if (tab === 'traces') {
+        // Clear any browser-autofilled dates on first open
+        if (!auditState._tabOpened) {
+          auditState._tabOpened = true;
+          const df = q('auditDateFrom');
+          const dt = q('auditDateTo');
+          if (df) df.value = '';
+          if (dt) dt.value = '';
+        }
+        auditState.page = 0;
+        loadAuditLogs();
+      }
       api('audit/ui-event', 'POST', {
         event_name: 'ui_visit_tab',
         event_type: 'visit',
@@ -1764,6 +1842,13 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function clippedCell(value, emptyLabel = '—') {
+  const raw = String(value ?? '').trim();
+  const text = raw !== '' ? raw : emptyLabel;
+  const escaped = escapeHtml(text);
+  return `<div class="cell-clip" title="${escaped}">${escaped}</div>`;
 }
 
 function toDelimitedString(value) {
@@ -2546,7 +2631,6 @@ async function loadBootstrap() {
   state.client_users = data.client_users || [];
   state.admin_users = data.admin_users || [];
   state.password_reset_audit = data.password_reset_audit || [];
-  state.audit_logs = data.audit_logs || [];
   state.activities = data.activities || [];
   state.labels = data.labels || [];
   state.supplier_types = data.supplier_types || [];
@@ -3740,25 +3824,36 @@ function bindEvents() {
   });
 
   q('btnReloadAuditLogs').addEventListener('click', async () => {
-    q('auditMsg').textContent = '';
-    try {
-      await loadBootstrap();
-      q('auditMsg').textContent = 'Traces rafraîchies';
-    } catch (e) {
-      q('auditMsg').textContent = e.message;
-    }
+    auditState.page = 0;
+    await loadAuditLogs();
+  });
+
+  q('btnExportAuditCsv').addEventListener('click', () => {
+    exportAuditCsv();
   });
 
   q('auditFilterText').addEventListener('input', () => {
     renderAuditLogs();
   });
 
+  // Server-side filters: reset to page 0 and reload
   q('auditFilterActorType').addEventListener('change', () => {
-    renderAuditLogs();
+    auditState.page = 0;
+    loadAuditLogs();
   });
 
   q('auditFilterKind').addEventListener('change', () => {
     renderAuditLogs();
+  });
+
+  q('auditDateFrom').addEventListener('change', () => {
+    auditState.page = 0;
+    loadAuditLogs();
+  });
+
+  q('auditDateTo').addEventListener('change', () => {
+    auditState.page = 0;
+    loadAuditLogs();
   });
 }
 

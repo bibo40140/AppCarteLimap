@@ -733,7 +733,7 @@ function send_supplier_consent_email(PDO $pdo, string $email, string $clientName
  */
 function notify_consent_approval_emails_for_client(PDO $pdo, int $clientId, string $textVersion): void
 {
-    $to = consent_approval_notification_recipients();
+    $to = consent_approval_notification_recipients($pdo);
     if (!$to || !function_exists('send_plain_email')) {
         return;
     }
@@ -764,7 +764,7 @@ function notify_consent_approval_emails_for_client(PDO $pdo, int $clientId, stri
  */
 function notify_consent_approval_emails_for_supplier(PDO $pdo, array $request): void
 {
-    $to = consent_approval_notification_recipients();
+    $to = consent_approval_notification_recipients($pdo);
     if (!$to || !function_exists('send_plain_email')) {
         return;
     }
@@ -806,13 +806,11 @@ function notify_consent_approval_emails_for_supplier(PDO $pdo, array $request): 
 
 /**
  * Fixed recipients requested for consent approval notifications.
+ * Uses admin notification emails configured in settings (or config.php fallback).
  */
-function consent_approval_notification_recipients(): array
+function consent_approval_notification_recipients(PDO $pdo): array
 {
-    return [
-        'contact@limap.fr',
-        'fabien.hicauber@gmail.com',
-    ];
+    return admin_notification_recipients($pdo);
 }
 
 /**

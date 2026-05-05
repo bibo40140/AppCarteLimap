@@ -314,6 +314,11 @@ try {
             list_admin_audit_logs($pdo);
             break;
 
+        case 'admin/audit/export-csv':
+            require_admin();
+            export_audit_logs_csv($pdo);
+            break;
+
         case 'audit/ui-event':
             require_client_or_admin();
             if ($method !== 'POST') {
@@ -725,7 +730,6 @@ function admin_bootstrap(PDO $pdo): void
     $clientUsers = $pdo->query('SELECT cu.id, cu.client_id, cu.username, cu.email, cu.role, cu.is_active, cu.last_login_at, cu.created_at, c.name AS client_name FROM client_users cu JOIN clients c ON c.id = cu.client_id ORDER BY c.name, cu.username')->fetchAll();
     $adminUsers = $pdo->query('SELECT id, username, email, is_active, last_login_at, created_at FROM admin_users ORDER BY username')->fetchAll();
     $resetAudit = $pdo->query('SELECT id, user_type, user_id, username, email, status, error_message, created_at FROM password_reset_audit ORDER BY id DESC LIMIT 30')->fetchAll();
-    $auditLogs = $pdo->query('SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log ORDER BY id DESC LIMIT 5000')->fetchAll();
     $activities = $pdo->query('SELECT * FROM activities ORDER BY family, name')->fetchAll();
     $labels = $pdo->query('SELECT * FROM labels ORDER BY name')->fetchAll();
     $supplierTypes = $pdo->query('SELECT * FROM supplier_types ORDER BY name')->fetchAll();
@@ -791,7 +795,6 @@ function admin_bootstrap(PDO $pdo): void
         'suppliers' => $suppliers,
         'settings' => $settings,
         'password_reset_audit' => $resetAudit,
-        'audit_logs' => $auditLogs,
         'supplier_link_request_pending_count' => $linkRequestPending,
     ]);
 }
@@ -876,36 +879,98 @@ function write_admin_audit(PDO $pdo, string $actionName, array $data = []): void
     }
 }
 
+function build_audit_where(array &$params): string
+{
+    $where = 'WHERE 1=1';
+
+    $action = trim((string)($_GET['action_name'] ?? ''));
+    if ($action !== '') {
+        $where .= ' AND action_name=:action_name';
+        $params[':action_name'] = $action;
+    }
+
+    $actorType = trim((string)($_GET['actor_type'] ?? ''));
+    if ($actorType !== '') {
+        $where .= ' AND actor_type=:actor_type';
+        $params[':actor_type'] = $actorType;
+    }
+
+    $dateFrom = trim((string)($_GET['date_from'] ?? ''));
+    if ($dateFrom !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+        $where .= ' AND created_at >= :date_from';
+        $params[':date_from'] = $dateFrom . ' 00:00:00';
+    }
+
+    $dateTo = trim((string)($_GET['date_to'] ?? ''));
+    if ($dateTo !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+        $where .= ' AND created_at <= :date_to';
+        $params[':date_to'] = $dateTo . ' 23:59:59';
+    }
+
+    return $where;
+}
+
 function list_admin_audit_logs(PDO $pdo): void
 {
     ensure_admin_audit_log_table($pdo);
 
     $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 500;
-    if ($limit <= 0) {
-        $limit = 500;
-    }
+    if ($limit <= 0) $limit = 500;
     $limit = min($limit, 5000);
 
-    $action = trim((string)($_GET['action_name'] ?? ''));
-    $actorType = trim((string)($_GET['actor_type'] ?? ''));
+    $offset = isset($_GET['offset']) ? max(0, (int)$_GET['offset']) : 0;
 
-    $sql = 'SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log WHERE 1=1';
     $params = [];
+    $where = build_audit_where($params);
 
-    if ($action !== '') {
-        $sql .= ' AND action_name=:action_name';
-        $params[':action_name'] = $action;
-    }
-    if ($actorType !== '') {
-        $sql .= ' AND actor_type=:actor_type';
-        $params[':actor_type'] = $actorType;
-    }
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM admin_audit_log ' . $where);
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
 
-    $sql .= ' ORDER BY id DESC LIMIT ' . $limit;
+    $sql = 'SELECT id, actor_type, actor_id, actor_name, action_name, target_type, target_id, target_label, details_json, ip_address, user_agent, created_at FROM admin_audit_log ' . $where . ' ORDER BY id DESC LIMIT ' . $limit . ' OFFSET ' . $offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    json_response(['ok' => true, 'logs' => $stmt->fetchAll()]);
+    json_response(['ok' => true, 'logs' => $stmt->fetchAll(), 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
+}
+
+function export_audit_logs_csv(PDO $pdo): void
+{
+    ensure_admin_audit_log_table($pdo);
+
+    $params = [];
+    $where = build_audit_where($params);
+
+    $sql = 'SELECT id, created_at, actor_type, actor_name, action_name, target_type, target_label, target_id, ip_address, details_json FROM admin_audit_log ' . $where . ' ORDER BY id DESC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $filename = 'traces_audit_' . date('Y-m-d') . '.csv';
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache');
+
+    $out = fopen('php://output', 'w');
+    // BOM for Excel UTF-8
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, ['ID', 'Date', 'Type acteur', 'Acteur', 'Action', 'Type cible', 'Cible', 'Cible ID', 'IP', 'Détails'], ';');
+
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        fputcsv($out, [
+            $row['id'],
+            $row['created_at'],
+            $row['actor_type'],
+            $row['actor_name'],
+            $row['action_name'],
+            $row['target_type'],
+            $row['target_label'],
+            $row['target_id'],
+            $row['ip_address'],
+            $row['details_json'],
+        ], ';');
+    }
+    fclose($out);
+    exit;
 }
 
 function track_ui_event(PDO $pdo): void

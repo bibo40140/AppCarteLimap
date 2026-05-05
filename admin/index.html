@@ -254,7 +254,10 @@
       <div class="card">
         <div class="row" style="justify-content:space-between;">
           <h3>Traces connexions et actions</h3>
-          <button id="btnReloadAuditLogs" type="button">Rafraîchir</button>
+          <div class="row" style="gap:8px;">
+            <button id="btnExportAuditCsv" type="button">⬇ Exporter CSV</button>
+            <button id="btnReloadAuditLogs" type="button">Rafraîchir</button>
+          </div>
         </div>
         <div class="grid-2">
           <label>Filtre texte
@@ -276,12 +279,20 @@
               <option value="auth">Authentification</option>
             </select>
           </label>
+          <label>Du
+            <input id="auditDateFrom" type="date" autocomplete="off" />
+          </label>
+          <label>Au
+            <input id="auditDateTo" type="date" autocomplete="off" />
+          </label>
         </div>
-        <div class="row" style="margin-top:8px;">
+        <div class="row" style="margin-top:8px;gap:12px;align-items:center;">
           <span id="auditSummary" class="muted"></span>
           <span id="auditMsg" class="muted"></span>
         </div>
+        <div id="auditPagination" class="row" style="margin-top:8px;gap:8px;align-items:center;"></div>
         <div id="auditLogsTable" style="margin-top:8px;"></div>
+        <div id="auditPaginationBottom" class="row" style="margin-top:8px;gap:8px;align-items:center;"></div>
       </div>
     </section>
 
@@ -443,8 +454,8 @@
         <div class="grid-2">
           <label>Filtrer par statut
             <select id="requestStatusFilter">
+              <option value="pending" selected>En attente</option>
               <option value="all">Tous</option>
-              <option value="pending">En attente</option>
               <option value="approved">Approuvées</option>
               <option value="rejected">Refusées</option>
             </select>
